@@ -1,0 +1,11 @@
+﻿namespace BookingPlatform.Contracts.Services;
+
+public sealed class CreateServiceRequest
+{
+    public long BusinessId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public decimal? BasePrice { get; set; }
+    public int EstimatedDurationMin { get; set; }
+    public int BookingStrategyType { get; set; }
+}
