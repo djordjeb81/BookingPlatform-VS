@@ -33,5 +33,9 @@ public sealed class BusinessConfiguration : IEntityTypeConfiguration<Business>
 
         builder.Property(x => x.UpdatedAtUtc)
             .IsRequired();
+
+        builder.Property(x => x.SlotIntervalMin)
+    .HasColumnName("slot_interval_min")
+    .IsRequired();
     }
 }

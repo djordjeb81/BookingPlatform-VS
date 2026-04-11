@@ -1,14 +1,12 @@
 ﻿namespace BookingPlatform.Contracts.Businesses;
 
-public sealed class CreateBusinessRequest
+public sealed class UpdateBusinessRequest
 {
     public string Name { get; set; } = string.Empty;
     public int BusinessType { get; set; }
     public string? Description { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
-
-    // Na koliko minuta od početka radnog vremena mogu da počinju termini.
-    // Primer: 30 => termini kreću na :00 i :30 od početka smene.
-    public int SlotIntervalMin { get; set; } = 30;
+    public int SlotIntervalMin { get; set; }
+    public bool IsActive { get; set; }
 }

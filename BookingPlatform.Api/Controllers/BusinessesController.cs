@@ -31,6 +31,7 @@ public sealed class BusinessesController : ControllerBase
                 Description = x.Description,
                 Phone = x.Phone,
                 Email = x.Email,
+                SlotIntervalMin = x.SlotIntervalMin,
                 IsActive = x.IsActive
             })
             .ToListAsync(cancellationToken);
@@ -38,11 +39,44 @@ public sealed class BusinessesController : ControllerBase
         return Ok(items);
     }
 
+    [HttpGet("{id:long}")]
+    public async Task<ActionResult<BusinessDto>> GetById(
+    [FromRoute] long id,
+    CancellationToken cancellationToken)
+    {
+        var item = await _dbContext.Businesses
+            .AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new BusinessDto
+            {
+                Id = x.Id,
+                Name = x.Name,
+                BusinessType = (int)x.BusinessType,
+                Description = x.Description,
+                Phone = x.Phone,
+                Email = x.Email,
+                SlotIntervalMin = x.SlotIntervalMin,
+                IsActive = x.IsActive
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (item is null)
+            return NotFound("Radnja ne postoji.");
+
+        return Ok(item);
+    }
+
     [HttpPost]
     public async Task<ActionResult<BusinessDto>> Create(
         [FromBody] CreateBusinessRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.SlotIntervalMin <= 0)
+            return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
+
+        if (request.SlotIntervalMin > 180)
+            return BadRequest("Razmak između početaka termina je prevelik.");
+
         var entity = new Business
         {
             Name = request.Name.Trim(),
@@ -50,6 +84,7 @@ public sealed class BusinessesController : ControllerBase
             Description = request.Description?.Trim(),
             Phone = request.Phone?.Trim(),
             Email = request.Email?.Trim(),
+            SlotIntervalMin = request.SlotIntervalMin,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
@@ -66,9 +101,118 @@ public sealed class BusinessesController : ControllerBase
             Description = entity.Description,
             Phone = entity.Phone,
             Email = entity.Email,
+            SlotIntervalMin = entity.SlotIntervalMin,
             IsActive = entity.IsActive
         };
 
         return CreatedAtAction(nameof(GetAll), new { id = entity.Id }, dto);
+    }
+
+    [HttpPut("{id:long}")]
+    public async Task<ActionResult<BusinessDto>> Update(
+    [FromRoute] long id,
+    [FromBody] UpdateBusinessRequest request,
+    CancellationToken cancellationToken)
+    {
+        var entity = await _dbContext.Businesses
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (entity is null)
+            return NotFound("Radnja ne postoji.");
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Unesite naziv radnje.");
+
+        if (request.SlotIntervalMin <= 0)
+            return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
+
+        if (request.SlotIntervalMin > 180)
+            return BadRequest("Razmak između početaka termina je prevelik.");
+
+        entity.Name = request.Name.Trim();
+        entity.BusinessType = (BusinessType)request.BusinessType;
+        entity.Description = request.Description?.Trim();
+        entity.Phone = request.Phone?.Trim();
+        entity.Email = request.Email?.Trim();
+        entity.SlotIntervalMin = request.SlotIntervalMin;
+        entity.IsActive = request.IsActive;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new BusinessDto
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            BusinessType = (int)entity.BusinessType,
+            Description = entity.Description,
+            Phone = entity.Phone,
+            Email = entity.Email,
+            SlotIntervalMin = entity.SlotIntervalMin,
+            IsActive = entity.IsActive
+        });
+    }
+    [HttpPost("{id:long}/deactivate")]
+    public async Task<ActionResult<BusinessDto>> Deactivate(
+    [FromRoute] long id,
+    CancellationToken cancellationToken)
+    {
+        var entity = await _dbContext.Businesses
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (entity is null)
+            return NotFound("Radnja ne postoji.");
+
+        if (!entity.IsActive)
+            return BadRequest("Radnja je već neaktivna.");
+
+        entity.IsActive = false;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new BusinessDto
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            BusinessType = (int)entity.BusinessType,
+            Description = entity.Description,
+            Phone = entity.Phone,
+            Email = entity.Email,
+            SlotIntervalMin = entity.SlotIntervalMin,
+            IsActive = entity.IsActive
+        });
+    }
+
+    [HttpPost("{id:long}/activate")]
+    public async Task<ActionResult<BusinessDto>> Activate(
+    [FromRoute] long id,
+    CancellationToken cancellationToken)
+    {
+        var entity = await _dbContext.Businesses
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (entity is null)
+            return NotFound("Radnja ne postoji.");
+
+        if (entity.IsActive)
+            return BadRequest("Radnja je već aktivna.");
+
+        entity.IsActive = true;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new BusinessDto
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            BusinessType = (int)entity.BusinessType,
+            Description = entity.Description,
+            Phone = entity.Phone,
+            Email = entity.Email,
+            SlotIntervalMin = entity.SlotIntervalMin,
+            IsActive = entity.IsActive
+        });
     }
 }

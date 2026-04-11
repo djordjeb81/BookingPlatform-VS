@@ -8,5 +8,6 @@ public sealed class BusinessDto
     public string? Description { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
+    public int SlotIntervalMin { get; set; }
     public bool IsActive { get; set; }
 }

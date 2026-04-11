@@ -33,6 +33,14 @@ public sealed class AppointmentChangeRequestConfiguration : IEntityTypeConfigura
         builder.Property(x => x.UpdatedAtUtc)
             .IsRequired();
 
+        builder.Property(x => x.ExpiresAtUtc);
+
+        builder.Property(x => x.RespondedAtUtc);
+
         builder.HasIndex(x => x.AppointmentId);
+
+        builder.HasIndex(x => new { x.Status, x.ExpiresAtUtc });
+
+        builder.HasIndex(x => new { x.AppointmentId, x.Status, x.CreatedAtUtc });
     }
 }

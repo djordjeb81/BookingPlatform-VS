@@ -43,7 +43,7 @@ public sealed class SchedulingController : ControllerBase
         if (request.SearchDays <= 0)
             return BadRequest("SearchDays mora biti veći od 0.");
 
-        var startDate = (request.StartDate ?? DateTime.UtcNow.Date).Date;
+        var startDate = DateTime.SpecifyKind((request.StartDate ?? DateTime.UtcNow.Date).Date, DateTimeKind.Utc);
 
         List<(long StaffId, string? StaffName)> staffCandidates;
 
@@ -135,7 +135,7 @@ public sealed class SchedulingController : ControllerBase
     [FromQuery] long? staffMemberId,
     CancellationToken cancellationToken)
     {
-        var targetDate = date.Date;
+        var targetDate = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
         var dayStartUtc = targetDate;
         var dayEndUtc = targetDate.AddDays(1);
 
@@ -274,6 +274,15 @@ public sealed class SchedulingController : ControllerBase
         if (service is null)
             return new List<AvailableSlotDto>();
 
+        var business = await _dbContext.Businesses
+    .AsNoTracking()
+    .FirstOrDefaultAsync(
+        x => x.Id == businessId && x.IsActive,
+        cancellationToken);
+
+        if (business is null)
+            return new List<AvailableSlotDto>();
+
         var staff = await _dbContext.StaffMembers
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -288,7 +297,7 @@ public sealed class SchedulingController : ControllerBase
             service.EstimatedDurationMin,
             cancellationToken);
 
-        var targetDate = date.Date;
+        var targetDate = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
 
         var dayOfWeek = targetDate.DayOfWeek switch
         {
@@ -356,7 +365,9 @@ public sealed class SchedulingController : ControllerBase
             .ToListAsync(cancellationToken);
 
         var results = new List<AvailableSlotDto>();
-        const int slotStepMinutes = 5;
+        var slotStepMinutes = business.SlotIntervalMin > 0
+    ? business.SlotIntervalMin
+    : 30;
 
         for (var candidateStart = dayStartUtc;
              candidateStart.AddMinutes(totalDurationMin) <= dayEndUtc;
