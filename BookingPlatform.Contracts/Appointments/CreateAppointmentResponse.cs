@@ -6,6 +6,7 @@ public sealed class CreateAppointmentResponse
     public long BusinessId { get; set; }
     public long ServiceId { get; set; }
     public long? PrimaryStaffMemberId { get; set; }
+    public long? ResourceId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;

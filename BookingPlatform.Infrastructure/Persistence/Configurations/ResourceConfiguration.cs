@@ -24,5 +24,9 @@ public sealed class ResourceConfiguration : IEntityTypeConfiguration<Resource>
 
         builder.Property(x => x.UpdatedAtUtc)
             .IsRequired();
+
+        builder.Property(x => x.AllowParallelUsage)
+    .IsRequired()
+    .HasDefaultValue(false);
     }
 }

@@ -1,28 +1,46 @@
 ﻿using BookingPlatform.Contracts.Services;
 using BookingPlatform.Domain.Services;
 using BookingPlatform.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Contracts.Common;
 
 namespace BookingPlatform.Api.Controllers;
 
 [ApiController]
+[Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
 [Route("api/[controller]")]
-public sealed class ServiceStepsController : ControllerBase
+public sealed class ServiceStepsController : ApiControllerBase
 {
-    private readonly BookingDbContext _dbContext;
-
-    public ServiceStepsController(BookingDbContext dbContext)
+    public ServiceStepsController(BookingDbContext dbContext) : base(dbContext)
     {
-        _dbContext = dbContext;
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(List<ServiceStepDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<List<ServiceStepDto>>> GetAll(
         [FromQuery] long serviceId,
         CancellationToken cancellationToken)
     {
-        var items = await _dbContext.ServiceSteps
+        var service = await DbContext.Services
+            .AsNoTracking()
+            .Where(x => x.Id == serviceId)
+            .Select(x => new { x.Id, x.BusinessId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (service is null)
+            return NotFound("Usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessReadAccessAsync(service.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var items = await DbContext.ServiceSteps
             .AsNoTracking()
             .Where(x => x.ServiceId == serviceId)
             .OrderBy(x => x.StepOrder)
@@ -42,43 +60,72 @@ public sealed class ServiceStepsController : ControllerBase
     }
 
     [HttpGet("{id:long}")]
+    [ProducesResponseType(typeof(ServiceStepDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ServiceStepDto>> GetById(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var item = await _dbContext.ServiceSteps
+        var entity = await DbContext.ServiceSteps
             .AsNoTracking()
-            .Where(x => x.Id == id)
-            .Select(x => new ServiceStepDto
-            {
-                Id = x.Id,
-                ServiceId = x.ServiceId,
-                StepOrder = x.StepOrder,
-                Name = x.Name,
-                DurationMin = x.DurationMin,
-                ClientPresenceRequired = x.ClientPresenceRequired,
-                SameStaffAsPrevious = x.SameStaffAsPrevious
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-        if (item is null)
+        if (entity is null)
             return NotFound("Korak usluge ne postoji.");
 
-        return Ok(item);
+        var service = await DbContext.Services
+            .AsNoTracking()
+            .Where(x => x.Id == entity.ServiceId)
+            .Select(x => new { x.Id, x.BusinessId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (service is null)
+            return BadRequest("Izabrana usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessReadAccessAsync(service.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        return Ok(new ServiceStepDto
+        {
+            Id = entity.Id,
+            ServiceId = entity.ServiceId,
+            StepOrder = entity.StepOrder,
+            Name = entity.Name,
+            DurationMin = entity.DurationMin,
+            ClientPresenceRequired = entity.ClientPresenceRequired,
+            SameStaffAsPrevious = entity.SameStaffAsPrevious
+        });
     }
 
     [HttpPost]
+    [ProducesResponseType(typeof(ServiceStepDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ServiceStepDto>> Create(
         [FromBody] CreateServiceStepRequest request,
         CancellationToken cancellationToken)
     {
-        var serviceExists = await _dbContext.Services
-            .AnyAsync(x => x.Id == request.ServiceId, cancellationToken);
+        var service = await DbContext.Services
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == request.ServiceId, cancellationToken);
 
-        if (!serviceExists)
+        if (service is null)
             return BadRequest("Izabrana usluga ne postoji.");
 
-        var orderExists = await _dbContext.ServiceSteps
+        var accessResult = await EnsureBusinessWriteAccessAsync(service.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Unesite naziv koraka.");
+
+        if (request.DurationMin <= 0)
+            return BadRequest("Trajanje koraka mora biti veće od 0 minuta.");
+
+        if (request.StepOrder <= 0)
+            return BadRequest("Redosled koraka mora biti veći od 0.");
+
+        var orderExists = await DbContext.ServiceSteps
             .AnyAsync(x => x.ServiceId == request.ServiceId && x.StepOrder == request.StepOrder, cancellationToken);
 
         if (orderExists)
@@ -94,10 +141,10 @@ public sealed class ServiceStepsController : ControllerBase
             SameStaffAsPrevious = request.SameStaffAsPrevious
         };
 
-        _dbContext.ServiceSteps.Add(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        DbContext.ServiceSteps.Add(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
-        var dto = new ServiceStepDto
+        return Ok(new ServiceStepDto
         {
             Id = entity.Id,
             ServiceId = entity.ServiceId,
@@ -106,21 +153,34 @@ public sealed class ServiceStepsController : ControllerBase
             DurationMin = entity.DurationMin,
             ClientPresenceRequired = entity.ClientPresenceRequired,
             SameStaffAsPrevious = entity.SameStaffAsPrevious
-        };
-
-        return Ok(dto);
+        });
     }
+
     [HttpPut("{id:long}")]
+    [ProducesResponseType(typeof(ServiceStepDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ServiceStepDto>> Update(
-    [FromRoute] long id,
-    [FromBody] UpdateServiceStepRequest request,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        [FromBody] UpdateServiceStepRequest request,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.ServiceSteps
+        var entity = await DbContext.ServiceSteps
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Korak usluge ne postoji.");
+
+        var service = await DbContext.Services
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == entity.ServiceId, cancellationToken);
+
+        if (service is null)
+            return BadRequest("Izabrana usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(service.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
 
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("Unesite naziv koraka.");
@@ -128,7 +188,10 @@ public sealed class ServiceStepsController : ControllerBase
         if (request.DurationMin <= 0)
             return BadRequest("Trajanje koraka mora biti veće od 0 minuta.");
 
-        var orderExists = await _dbContext.ServiceSteps
+        if (request.StepOrder <= 0)
+            return BadRequest("Redosled koraka mora biti veći od 0.");
+
+        var orderExists = await DbContext.ServiceSteps
             .AnyAsync(
                 x => x.ServiceId == entity.ServiceId &&
                      x.Id != id &&
@@ -144,7 +207,7 @@ public sealed class ServiceStepsController : ControllerBase
         entity.ClientPresenceRequired = request.ClientPresenceRequired;
         entity.SameStaffAsPrevious = request.SameStaffAsPrevious;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new ServiceStepDto
         {
@@ -157,19 +220,33 @@ public sealed class ServiceStepsController : ControllerBase
             SameStaffAsPrevious = entity.SameStaffAsPrevious
         });
     }
+
     [HttpDelete("{id:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> Delete(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.ServiceSteps
+        var entity = await DbContext.ServiceSteps
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Korak usluge ne postoji.");
 
-        _dbContext.ServiceSteps.Remove(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        var service = await DbContext.Services
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == entity.ServiceId, cancellationToken);
+
+        if (service is null)
+            return BadRequest("Izabrana usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(service.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        DbContext.ServiceSteps.Remove(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
     }

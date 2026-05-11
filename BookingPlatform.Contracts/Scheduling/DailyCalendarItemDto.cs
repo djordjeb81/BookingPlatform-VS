@@ -12,6 +12,9 @@ public sealed class DailyCalendarItemDto
     public long? StaffMemberId { get; set; }
     public string? StaffDisplayName { get; set; }
 
+    public long? ResourceId { get; set; }
+    public string? ResourceName { get; set; }
+
     public DateTime StartAtUtc { get; set; }
     public DateTime EndAtUtc { get; set; }
 

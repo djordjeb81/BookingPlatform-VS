@@ -5,7 +5,9 @@ namespace BookingPlatform.Domain.Appointments;
 public sealed class Appointment : AuditableEntity
 {
     public long BusinessId { get; set; }
+    public long? BusinessCustomerId { get; set; }
     public long ServiceId { get; set; }
+    public long? ResourceId { get; set; }
     public long? PrimaryStaffMemberId { get; set; }
 
     public string CustomerName { get; set; } = string.Empty;
@@ -18,4 +20,6 @@ public sealed class Appointment : AuditableEntity
     public DateTime EndAtUtc { get; set; }
 
     public string? Notes { get; set; }
+    public ICollection<AppointmentStaffUsage> StaffUsages { get; set; }
+    = new List<AppointmentStaffUsage>();
 }

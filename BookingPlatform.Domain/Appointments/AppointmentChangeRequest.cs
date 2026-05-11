@@ -16,6 +16,8 @@ public sealed class AppointmentChangeRequest : AuditableEntity
     public DateTime ProposedStartAtUtc { get; set; }
     public DateTime ProposedEndAtUtc { get; set; }
 
+    public long? ProposedStaffMemberId { get; set; }
+
     public string? Reason { get; set; }
     public string? Message { get; set; }
 

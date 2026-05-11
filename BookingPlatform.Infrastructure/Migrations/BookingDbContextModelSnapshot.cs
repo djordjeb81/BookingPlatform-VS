@@ -30,6 +30,9 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("BusinessId")
                         .HasColumnType("bigint");
 
@@ -60,6 +63,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<long?>("PrimaryStaffMemberId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("ResourceId")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("ServiceId")
                         .HasColumnType("bigint");
 
@@ -73,6 +79,10 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BusinessCustomerId");
+
+                    b.HasIndex("BusinessId", "BusinessCustomerId", "StartAtUtc");
 
                     b.ToTable("appointments", (string)null);
                 });
@@ -149,6 +159,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<DateTime>("ProposedEndAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long?>("ProposedStaffMemberId")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime>("ProposedStartAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -177,6 +190,43 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("AppointmentId", "Status", "CreatedAtUtc");
 
                     b.ToTable("appointment_change_requests", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Appointments.AppointmentStaffUsage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AppointmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMin")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppointmentId");
+
+                    b.HasIndex("StaffMemberId");
+
+                    b.HasIndex("StaffMemberId", "AppointmentId");
+
+                    b.ToTable("appointment_staff_usages", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Appointments.ReservationHold", b =>
@@ -227,6 +277,137 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("reservation_holds", (string)null);
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.Auth.AppUser", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedEmail")
+                        .IsUnique();
+
+                    b.ToTable("app_users", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Auth.BusinessUserMembership", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("BusinessId", "AppUserId")
+                        .IsUnique();
+
+                    b.ToTable("business_user_memberships", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Auth.EmailVerificationCode", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("UsedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedEmail", "Purpose", "ExpiresAtUtc");
+
+                    b.HasIndex("NormalizedEmail", "Purpose", "UsedAtUtc");
+
+                    b.ToTable("email_verification_codes", (string)null);
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Businesses.Business", b =>
                 {
                     b.Property<long>("Id")
@@ -237,6 +418,14 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     b.Property<int>("BusinessType")
                         .HasColumnType("integer");
+
+                    b.Property<string>("City")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Country")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -249,8 +438,20 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("GooglePlaceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -261,9 +462,21 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("PostalCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
                     b.Property<int>("SlotIntervalMin")
                         .HasColumnType("integer")
                         .HasColumnName("slot_interval_min");
+
+                    b.Property<string>("Street")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("StreetNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -271,6 +484,335 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("businesses", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatConversation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("LastMessageAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastMessageText")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("UnreadForBusinessCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UnreadForCustomerCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessCustomerId");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("LastMessageAtUtc");
+
+                    b.HasIndex("BusinessId", "BusinessCustomerId")
+                        .IsUnique()
+                        .HasFilter("\"BusinessCustomerId\" IS NOT NULL");
+
+                    b.ToTable("chat_conversations", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActionType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long?>("AppointmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ChangeRequestId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReadByBusinessAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReadByCustomerAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SenderType")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("SenderUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppointmentId");
+
+                    b.HasIndex("ChangeRequestId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("ConversationId", "CreatedAtUtc");
+
+                    b.ToTable("chat_messages", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Customers.BusinessCustomer", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("RemovedFromCustomerListAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CustomerProfileId");
+
+                    b.HasIndex("BusinessId", "CustomerProfileId")
+                        .IsUnique();
+
+                    b.HasIndex("BusinessId", "Email");
+
+                    b.HasIndex("BusinessId", "FullName");
+
+                    b.HasIndex("BusinessId", "IsActive");
+
+                    b.HasIndex("BusinessId", "Phone");
+
+                    b.ToTable("business_customers", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Customers.CustomerProfile", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.ToTable("customer_profiles", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Licensing.LicensedDevice", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ComputerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("HwidHash")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("LastLicenseRefreshAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LicenseToken")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("LicenseTokenIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProgramVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ValidUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId", "HwidHash")
+                        .IsUnique();
+
+                    b.ToTable("LicensedDevices");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Push.UserPushToken", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.ToTable("user_push_tokens", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Resources.Resource", b =>
@@ -281,6 +823,11 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<bool>("AllowParallelUsage")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("BusinessId")
                         .HasColumnType("bigint");
 
@@ -290,6 +837,12 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("CreatesOccupancy")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CustomerActionText")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -297,6 +850,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<long?>("ResourceGroupId")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("ResourceType")
                         .HasColumnType("integer");
@@ -306,7 +862,75 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ResourceGroupId");
+
                     b.ToTable("resources", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Resources.ResourceGroup", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("resource_groups", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Resources.ServiceResourceRequirement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("ResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ServiceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServiceId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("service_resource_requirements", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.BusinessWorkingHour", b =>
@@ -338,6 +962,93 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("business_working_hours", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleOverride", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<TimeSpan?>("EndTime")
+                        .HasColumnType("interval");
+
+                    b.Property<bool>("IsDayOff")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("OverrideType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("ShiftType")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<TimeSpan?>("StartTime")
+                        .HasColumnType("interval");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StaffMemberId", "Date");
+
+                    b.ToTable("staff_schedule_overrides", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleRule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeSpan>("EndTime")
+                        .HasColumnType("interval");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("SegmentType")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<TimeSpan>("StartTime")
+                        .HasColumnType("interval");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("WeekType")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StaffMemberId", "DayOfWeek", "WeekType");
+
+                    b.ToTable("staff_schedule_rules", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffWorkingHour", b =>
@@ -461,6 +1172,78 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("services", (string)null);
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerDisplayText")
+                        .HasColumnType("text");
+
+                    b.Property<int>("DurationMin")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("ResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ServiceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("StaffId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StaffId");
+
+                    b.ToTable("service_resource_usages", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsageStaffMember", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ServiceResourceUsageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StaffMemberId");
+
+                    b.HasIndex("ServiceResourceUsageId", "StaffMemberId")
+                        .IsUnique();
+
+                    b.ToTable("service_resource_usage_staff_members", (string)null);
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceStep", b =>
                 {
                     b.Property<long>("Id")
@@ -497,6 +1280,37 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("service_steps", (string)null);
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceStepResourceRequirement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("ResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("SequenceOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("ServiceStepId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("UsageDurationMin")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServiceStepId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("ServiceStepResourceRequirement");
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Staff.StaffMember", b =>
                 {
                     b.Property<long>("Id")
@@ -522,6 +1336,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<bool>("IsBookable")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("ScheduleMode")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Title")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -532,6 +1349,251 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("staff_members", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Staff.StaffResourceAssignment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("StaffMemberId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("staff_resource_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Staff.StaffServiceAssignment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ServiceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("StaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServiceId");
+
+                    b.HasIndex("StaffMemberId", "ServiceId")
+                        .IsUnique();
+
+                    b.ToTable("staff_service_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Appointments.Appointment", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Customers.BusinessCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("BusinessCustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Appointments.AppointmentStaffUsage", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Appointments.Appointment", "Appointment")
+                        .WithMany("StaffUsages")
+                        .HasForeignKey("AppointmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", "StaffMember")
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Appointment");
+
+                    b.Navigation("StaffMember");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Auth.BusinessUserMembership", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", "AppUser")
+                        .WithMany("BusinessMemberships")
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany("UserMemberships")
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppUser");
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Customers.BusinessCustomer", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", null)
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Customers.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CustomerProfile");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Licensing.LicensedDevice", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Resources.Resource", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Resources.ResourceGroup", "ResourceGroup")
+                        .WithMany("Resources")
+                        .HasForeignKey("ResourceGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ResourceGroup");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Resources.ResourceGroup", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleOverride", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", null)
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleRule", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", null)
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsage", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", null)
+                        .WithMany()
+                        .HasForeignKey("StaffId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsageStaffMember", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Services.ServiceResourceUsage", "ServiceResourceUsage")
+                        .WithMany("StaffMembers")
+                        .HasForeignKey("ServiceResourceUsageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", "StaffMember")
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ServiceResourceUsage");
+
+                    b.Navigation("StaffMember");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Staff.StaffResourceAssignment", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Resources.Resource", null)
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", null)
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Staff.StaffServiceAssignment", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Services.Service", null)
+                        .WithMany()
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", null)
+                        .WithMany()
+                        .HasForeignKey("StaffMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Appointments.Appointment", b =>
+                {
+                    b.Navigation("StaffUsages");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Auth.AppUser", b =>
+                {
+                    b.Navigation("BusinessMemberships");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Businesses.Business", b =>
+                {
+                    b.Navigation("UserMemberships");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Resources.ResourceGroup", b =>
+                {
+                    b.Navigation("Resources");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsage", b =>
+                {
+                    b.Navigation("StaffMembers");
                 });
 #pragma warning restore 612, 618
         }

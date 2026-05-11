@@ -7,12 +7,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Scheduling\AppointmentSchedulingService.cs" />
+    <Compile Remove="Scheduling\IAppointmentSchedulingService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Identity\" />
     <Folder Include="Businesses\" />
+    <Folder Include="Scheduling\" />
     <Folder Include="Staff\" />
     <Folder Include="Resources\" />
     <Folder Include="Services\" />
-    <Folder Include="Scheduling\" />
     <Folder Include="Appointments\" />
     <Folder Include="Notifications\" />
     <Folder Include="Waitlist\" />

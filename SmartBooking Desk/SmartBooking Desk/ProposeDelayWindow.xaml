@@ -1,0 +1,65 @@
+﻿<Window x:Class="SmartBooking_Desk.ProposeDelayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Predloži odlaganje"
+        Height="320"
+        Width="460"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Predloži odlaganje termina"
+                   FontSize="20"
+                   FontWeight="SemiBold"/>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Odlaganje u minutima"/>
+            <ComboBox x:Name="ComboBoxDelayMinutes"
+                      Margin="0,6,0,0"
+                      Height="34"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="4">
+            <TextBlock Text="Poruka"/>
+            <TextBox x:Name="TextBoxMessage"
+                     Margin="0,6,0,0"
+                     Height="80"
+                     TextWrapping="Wrap"
+                     AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"/>
+        </StackPanel>
+
+        <TextBlock x:Name="TextBlockStatus"
+                   Grid.Row="6"
+                   Text="Izaberite koliko minuta želite da pomerite termin."
+                   TextWrapping="Wrap"
+                   Foreground="#555555"/>
+
+        <StackPanel Grid.Row="8"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="ButtonCancel"
+                    Content="Odustani"
+                    Width="110"
+                    Height="34"
+                    Margin="0,0,8,0"
+                    Click="ButtonCancel_Click"/>
+            <Button x:Name="ButtonSave"
+                    Content="Pošalji predlog"
+                    Width="140"
+                    Height="34"
+                    Click="ButtonSave_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

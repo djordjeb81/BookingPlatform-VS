@@ -1,56 +1,39 @@
-﻿using BookingPlatform.Contracts.Appointments;
+﻿using BookingPlatform.Api.Helpers;
+using BookingPlatform.Api.Services;
+using BookingPlatform.Contracts.Appointments;
 using BookingPlatform.Domain.Appointments;
+using BookingPlatform.Domain.Services;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-
+using System.Security.Claims;
 
 namespace BookingPlatform.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Produces("application/json")]
+[Route("api/Appointments")]
 public sealed class AppointmentsController : ControllerBase
 {
     private readonly BookingDbContext _dbContext;
+    private readonly IAppointmentSchedulingService _appointmentSchedulingService;
+    private readonly IChatSystemMessageService _chatSystemMessageService;
 
-    public AppointmentsController(BookingDbContext dbContext)
+    public AppointmentsController(
+        BookingDbContext dbContext,
+        IAppointmentSchedulingService appointmentSchedulingService,
+        IChatSystemMessageService chatSystemMessageService)
     {
         _dbContext = dbContext;
+        _appointmentSchedulingService = appointmentSchedulingService;
+        _chatSystemMessageService = chatSystemMessageService;
     }
 
-    [HttpGet]
-    public async Task<ActionResult<List<AppointmentListItemResponse>>> GetAll(
-    [FromQuery] long? businessId,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
 
-        var query = _dbContext.Appointments.AsNoTracking();
-
-        if (businessId.HasValue)
-            query = query.Where(x => x.BusinessId == businessId.Value);
-
-        var items = await query
-            .OrderBy(x => x.StartAtUtc)
-.Select(x => new AppointmentListItemResponse
-{
-    Id = x.Id,
-    BusinessId = x.BusinessId,
-    ServiceId = x.ServiceId,
-    PrimaryStaffMemberId = x.PrimaryStaffMemberId,
-    CustomerName = x.CustomerName,
-    CustomerPhone = x.CustomerPhone,
-    Status = x.Status.ToString(),
-    StartAtUtc = x.StartAtUtc,
-    EndAtUtc = x.EndAtUtc,
-    Notes = x.Notes
-})
-            .ToListAsync(cancellationToken);
-
-        return Ok(items);
-    }
 
     [HttpPost]
+    [ProducesResponseType(typeof(CreateAppointmentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CreateAppointmentErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<CreateAppointmentResponse>> Create(
     [FromBody] CreateAppointmentRequest request,
     CancellationToken cancellationToken)
@@ -62,20 +45,64 @@ public sealed class AppointmentsController : ControllerBase
                 cancellationToken);
 
         if (service is null)
-            return BadRequest("Izabrana usluga ne postoji.");
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                "Izabrana usluga ne postoji.",
+                "service_not_found"));
+        }
 
         if (request.PrimaryStaffMemberId.HasValue)
         {
-            var staffExists = await _dbContext.StaffMembers
-                .AnyAsync(
-                    x => x.Id == request.PrimaryStaffMemberId.Value && x.BusinessId == request.BusinessId,
-                    cancellationToken);
+            var staffServiceValidationError = await StaffServiceValidationHelper.ValidateStaffCanPerformServiceAsync(
+                _dbContext,
+                request.BusinessId,
+                request.ServiceId,
+                request.PrimaryStaffMemberId,
+                cancellationToken);
 
-            if (!staffExists)
-                return BadRequest("Izabrani zaposleni ne postoji.");
+            if (staffServiceValidationError is not null)
+            {
+                return BadRequest(BuildCreateAppointmentErrorResponse(
+                    staffServiceValidationError,
+                    MapStaffServiceValidationReasonCode(staffServiceValidationError)));
+            }
+
+            var staffResourceValidationError = await StaffResourceValidationHelper.ValidateStaffCanUseResourceAsync(
+                _dbContext,
+                request.BusinessId,
+                request.PrimaryStaffMemberId,
+                request.ResourceId,
+                cancellationToken);
+
+            if (staffResourceValidationError is not null)
+            {
+                return BadRequest(BuildCreateAppointmentErrorResponse(
+                    staffResourceValidationError,
+                    MapStaffResourceValidationReasonCode(staffResourceValidationError)));
+            }
         }
 
-        var totalDurationMin = await GetTotalServiceDurationAsync(
+        if (!request.PrimaryStaffMemberId.HasValue)
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                "Potrebno je izabrati zaposlenog.",
+                "staff_required"));
+        }
+
+        var resourceValidationError = await ValidateServiceResourceSelectionAsync(
+            request.BusinessId,
+            request.ServiceId,
+            request.ResourceId,
+            cancellationToken);
+
+        if (resourceValidationError is not null)
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                resourceValidationError,
+                MapCreateResourceSelectionReasonCode(resourceValidationError)));
+        }
+
+        var totalDurationMin = await _appointmentSchedulingService.GetTotalServiceDurationAsync(
             service.Id,
             service.EstimatedDurationMin,
             cancellationToken);
@@ -83,32 +110,89 @@ public sealed class AppointmentsController : ControllerBase
         var proposedStart = request.StartAtUtc;
         var proposedEnd = request.StartAtUtc.AddMinutes(totalDurationMin);
 
-        if (!request.PrimaryStaffMemberId.HasValue)
-            return BadRequest("Potrebno je izabrati zaposlenog.");
-
-        var isAlignedToSlotGrid = await IsStartAlignedToBusinessSlotGridAsync(
-            request.BusinessId,
-            request.PrimaryStaffMemberId.Value,
-            proposedStart,
-            cancellationToken);
-
-        if (!isAlignedToSlotGrid)
-            return BadRequest("Izabrani početak termina nije dostupan. Izaberite ponuđeni termin.");
-
-        var availability = await IsSpecificTimeAvailableAsync(
-            request.BusinessId,
-            request.PrimaryStaffMemberId.Value,
-            proposedStart,
-            proposedEnd,
-            null,
-            ignoreWorkingHours: false,
-            ignoreTimeOffBlocks: false,
-            ignoreAppointmentConflicts: false,
-            cancellationToken);
+        var availability = await CheckAvailabilityViaServiceAsync(
+    request.BusinessId,
+    request.ServiceId,
+    request.PrimaryStaffMemberId.Value,
+    request.ResourceId,
+    proposedStart,
+    proposedEnd,
+    null,
+    false,
+    false,
+    false,
+    cancellationToken);
 
         if (!availability.IsAvailable)
-            return BadRequest("Izabrani termin nije dostupan.");
+            return BadRequest(BuildCreateAppointmentErrorResponse(availability));
 
+        var isAlignedToSlotGrid = await _appointmentSchedulingService.IsStartAlignedToBusinessSlotGridAsync(
+            request.BusinessId,
+            request.PrimaryStaffMemberId.Value,
+            proposedStart,
+            cancellationToken);
+
+        // Normalni slotovi prolaze.
+        // Međutermini koje je sistem ponudio prolaze zato što je availability već potvrdio da ima mesta.
+        if (!isAlignedToSlotGrid)
+        {
+            availability.HasSlotGridViolation = true;
+            availability.ReasonCodes.Add("outside_slot_grid_but_available");
+        }
+        var userId = TryGetCurrentUserId();
+
+        if (!userId.HasValue)
+        {
+            return Unauthorized("Korisnik nije autentifikovan.");
+        }
+
+        var customerProfile = await _dbContext.CustomerProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.AppUserId == userId.Value,
+                cancellationToken);
+
+        if (customerProfile is null)
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                "Korisnik nema povezan klijent profil.",
+                "customer_profile_not_found"));
+        }
+
+        var businessCustomer = await _dbContext.BusinessCustomers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == request.BusinessId &&
+                     x.CustomerProfileId == customerProfile.Id &&
+                     x.IsActive,
+                cancellationToken);
+
+        if (businessCustomer is null)
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                "Klijent nije povezan sa izabranim biznisom.",
+                "business_customer_not_found"));
+        }
+
+        var customerName = string.IsNullOrWhiteSpace(businessCustomer.FullName)
+            ? request.CustomerName?.Trim()
+            : businessCustomer.FullName.Trim();
+
+        var customerPhone = string.IsNullOrWhiteSpace(businessCustomer.Phone)
+            ? request.CustomerPhone?.Trim()
+            : businessCustomer.Phone.Trim();
+
+        if (string.IsNullOrWhiteSpace(customerName))
+        {
+            return BadRequest(BuildCreateAppointmentErrorResponse(
+                "Ime klijenta je obavezno.",
+                "customer_name_required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(customerPhone))
+        {
+            customerPhone = "";
+        }
         var now = DateTime.UtcNow;
 
         var appointment = new Appointment
@@ -116,8 +200,10 @@ public sealed class AppointmentsController : ControllerBase
             BusinessId = request.BusinessId,
             ServiceId = request.ServiceId,
             PrimaryStaffMemberId = request.PrimaryStaffMemberId,
-            CustomerName = request.CustomerName.Trim(),
-            CustomerPhone = request.CustomerPhone.Trim(),
+            ResourceId = request.ResourceId,
+            BusinessCustomerId = businessCustomer.Id,
+            CustomerName = customerName,
+            CustomerPhone = customerPhone,
             StartAtUtc = proposedStart,
             EndAtUtc = proposedEnd,
             Status = AppointmentStatus.PendingApproval,
@@ -128,6 +214,17 @@ public sealed class AppointmentsController : ControllerBase
 
         _dbContext.Appointments.Add(appointment);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+
+
+        await _appointmentSchedulingService.CreateAppointmentStaffUsagesAsync(
+            appointment.Id,
+            appointment.BusinessId,
+            appointment.ServiceId,
+            appointment.PrimaryStaffMemberId!.Value,
+            appointment.StartAtUtc,
+            appointment.EndAtUtc,
+            cancellationToken);
 
         var changeRequest = new AppointmentChangeRequest
         {
@@ -149,12 +246,30 @@ public sealed class AppointmentsController : ControllerBase
         _dbContext.AppointmentChangeRequests.Add(changeRequest);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        if (appointment.PrimaryStaffMemberId.HasValue)
+        {
+            await _appointmentSchedulingService.CreateAppointmentStaffUsagesAsync(
+                appointment.Id,
+                appointment.BusinessId,
+                appointment.ServiceId,
+                appointment.PrimaryStaffMemberId.Value,
+                appointment.StartAtUtc,
+                appointment.EndAtUtc,
+                cancellationToken);
+        }
+
+        await _chatSystemMessageService.SendCustomerRequestedNewBookingToBusinessAsync(
+    appointment,
+    changeRequest,
+    cancellationToken);
+
         return Ok(new CreateAppointmentResponse
         {
             Id = appointment.Id,
             BusinessId = appointment.BusinessId,
             ServiceId = appointment.ServiceId,
             PrimaryStaffMemberId = appointment.PrimaryStaffMemberId,
+            ResourceId = appointment.ResourceId,
             CustomerName = appointment.CustomerName,
             CustomerPhone = appointment.CustomerPhone,
             Status = appointment.Status.ToString(),
@@ -166,511 +281,27 @@ public sealed class AppointmentsController : ControllerBase
         });
     }
 
-    [HttpPost("owner-create")]
-    public async Task<ActionResult<OwnerCreateAppointmentResponse>> CreateOwnerAppointment(
- [FromBody] CreateOwnerAppointmentRequest request,
- CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
 
-        var service = await _dbContext.Services
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Id == request.ServiceId && x.BusinessId == request.BusinessId,
-                cancellationToken);
-
-        if (service is null)
-            return BadRequest("Izabrana usluga ne postoji.");
-
-        if (request.PrimaryStaffMemberId.HasValue)
-        {
-            var staffExists = await _dbContext.StaffMembers
-                .AnyAsync(
-                    x => x.Id == request.PrimaryStaffMemberId.Value && x.BusinessId == request.BusinessId,
-                    cancellationToken);
-
-            if (!staffExists)
-                return BadRequest("Izabrani zaposleni ne postoji.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.CustomerName))
-            return BadRequest("Unesite ime klijenta.");
-
-        if (string.IsNullOrWhiteSpace(request.CustomerPhone))
-            return BadRequest("Unesite broj telefona klijenta.");
-
-        var defaultDurationMin = await GetTotalServiceDurationAsync(
-            service.Id,
-            service.EstimatedDurationMin,
-            cancellationToken);
-
-        if (request.FinalDurationMin.HasValue)
-        {
-            if (request.FinalDurationMin.Value <= 0)
-                return BadRequest("Trajanje termina mora biti veće od 0 minuta.");
-
-            if (request.FinalDurationMin.Value % 5 != 0)
-                return BadRequest("Trajanje termina mora biti zadato u koracima od 5 minuta.");
-        }
-
-        var effectiveDurationMin = request.FinalDurationMin ?? defaultDurationMin;
-        var startAtUtc = request.StartAtUtc;
-        var endAtUtc = startAtUtc.AddMinutes(effectiveDurationMin);
-        var useLegacyMasterOverride = request.IgnoreAvailabilityRules;
-        var effectiveIgnoreWorkingHours = useLegacyMasterOverride || request.IgnoreWorkingHours;
-        var effectiveIgnoreTimeOffBlocks = useLegacyMasterOverride || request.IgnoreTimeOffBlocks;
-        var effectiveIgnoreAppointmentConflicts = useLegacyMasterOverride || request.IgnoreAppointmentConflicts;
-
-        var effectiveGridOverride =
-            useLegacyMasterOverride ||
-            effectiveIgnoreWorkingHours ||
-            effectiveIgnoreTimeOffBlocks ||
-            effectiveIgnoreAppointmentConflicts;
-
-        var hasSlotGridViolation = false;
-
-        if (!request.PrimaryStaffMemberId.HasValue)
-            return BadRequest("Potrebno je izabrati zaposlenog.");
-
-        var isAlignedToSlotGrid = await IsStartAlignedToBusinessSlotGridAsync(
-            request.BusinessId,
-            request.PrimaryStaffMemberId.Value,
-            startAtUtc,
-            cancellationToken);
-
-        if (!isAlignedToSlotGrid)
-        {
-            hasSlotGridViolation = true;
-
-            if (!effectiveGridOverride)
-            {
-                return BadRequest(new OwnerCreateAvailabilityErrorResponse
-                {
-                    Message = "Izabrani početak termina nije na rasporedu radnje.",
-                    ReasonCode = "outside_slot_grid",
-                    ReasonCodes = new List<string> { "outside_slot_grid" },
-                    HasSlotGridViolation = true,
-                    HasBusinessHoursViolation = false,
-                    HasStaffHoursViolation = false,
-                    HasTimeOffConflict = false,
-                    HasAppointmentConflict = false,
-                    BypassedSlotGrid = false,
-                    BypassedWorkingHours = false,
-                    BypassedTimeOffBlocks = false,
-                    BypassedAppointmentConflicts = false,
-                    EffectiveIgnoreWorkingHours = effectiveIgnoreWorkingHours,
-                    EffectiveIgnoreTimeOffBlocks = effectiveIgnoreTimeOffBlocks,
-                    EffectiveIgnoreAppointmentConflicts = effectiveIgnoreAppointmentConflicts,
-                    LegacyMasterOverride = useLegacyMasterOverride,
-                    AppliedOverrides = new List<string>(),
-                    AppliedOverrideLabels = new List<string>()
-                });
-            }
-        }
-        var availability = await IsOwnerCreateTimeAvailableAsync(
-            request,
-            endAtUtc,
-            cancellationToken);
-        availability.HasSlotGridViolation = hasSlotGridViolation;
-        var bypassedSlotGrid =
-    availability.HasSlotGridViolation &&
-    effectiveGridOverride;
-        var bypassedWorkingHours =
-    (availability.HasBusinessHoursViolation || availability.HasStaffHoursViolation) &&
-    effectiveIgnoreWorkingHours;
-
-        var bypassedTimeOffBlocks =
-            availability.HasTimeOffConflict &&
-            effectiveIgnoreTimeOffBlocks;
-
-        var bypassedAppointmentConflicts =
-            availability.HasAppointmentConflict &&
-            effectiveIgnoreAppointmentConflicts;
-
-        var appliedOverrides = GetOwnerCreateAppliedOverrides(
-            bypassedSlotGrid,
-            bypassedWorkingHours,
-            bypassedTimeOffBlocks,
-            bypassedAppointmentConflicts);
-        var appliedOverrideLabels = GetOwnerCreateAppliedOverrideLabels(
-            bypassedSlotGrid,
-            bypassedWorkingHours,
-            bypassedTimeOffBlocks,
-            bypassedAppointmentConflicts); ;
-
-        var creationMode = GetOwnerCreateCreationMode(
-            bypassedSlotGrid,
-            bypassedWorkingHours,
-            bypassedTimeOffBlocks,
-            bypassedAppointmentConflicts);
-
-        var creationModeLabel = GetOwnerCreateCreationModeLabel(creationMode);
-
-
-        if (!availability.IsAvailable)
-        {
-            return BadRequest(new OwnerCreateAvailabilityErrorResponse
-            {
-                Message = availability.Message,
-                ReasonCode = availability.ReasonCode,
-                ReasonCodes = availability.ReasonCodes,
-                HasSlotGridViolation = availability.HasSlotGridViolation,
-                HasBusinessHoursViolation = availability.HasBusinessHoursViolation,
-                HasStaffHoursViolation = availability.HasStaffHoursViolation,
-                HasTimeOffConflict = availability.HasTimeOffConflict,
-                HasAppointmentConflict = availability.HasAppointmentConflict,
-                BypassedSlotGrid = bypassedSlotGrid,
-                BypassedWorkingHours = bypassedWorkingHours,
-                BypassedTimeOffBlocks = bypassedTimeOffBlocks,
-                BypassedAppointmentConflicts = bypassedAppointmentConflicts,
-                EffectiveIgnoreWorkingHours = request.IgnoreAvailabilityRules || request.IgnoreWorkingHours,
-                EffectiveIgnoreTimeOffBlocks = request.IgnoreAvailabilityRules || request.IgnoreTimeOffBlocks,
-                EffectiveIgnoreAppointmentConflicts = request.IgnoreAvailabilityRules || request.IgnoreAppointmentConflicts,
-                LegacyMasterOverride = useLegacyMasterOverride,
-                AppliedOverrides = appliedOverrides,
-                AppliedOverrideLabels = appliedOverrideLabels
-            });
-        }
-
-
-        var now = DateTime.UtcNow;
-
-        var appointment = new Appointment
-        {
-            BusinessId = request.BusinessId,
-            ServiceId = request.ServiceId,
-            PrimaryStaffMemberId = request.PrimaryStaffMemberId,
-            CustomerName = request.CustomerName.Trim(),
-            CustomerPhone = request.CustomerPhone.Trim(),
-            StartAtUtc = startAtUtc,
-            EndAtUtc = endAtUtc,
-            Status = AppointmentStatus.Confirmed,
-            Notes = request.Notes?.Trim(),
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        };
-
-        _dbContext.Appointments.Add(appointment);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        await AddAuditLogAsync(
-            appointment.Id,
-            "OwnerCreatedConfirmedAppointment",
-            BuildOwnerCreateAuditMessage(
-                availability.WasAvailableByRules,
-                bypassedSlotGrid,
-                bypassedWorkingHours,
-                bypassedTimeOffBlocks,
-                bypassedAppointmentConflicts),
-            null,
-            $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};Status={appointment.Status};" +
-            $"FinalDurationMin={request.FinalDurationMin};EffectiveDurationMin={effectiveDurationMin};" +
-            $"IgnoreAvailabilityRules={request.IgnoreAvailabilityRules};LegacyMasterOverride={useLegacyMasterOverride};" +
-            $"IgnoreWorkingHours={effectiveIgnoreWorkingHours};IgnoreTimeOffBlocks={effectiveIgnoreTimeOffBlocks};" +
-            $"HasSlotGridViolation={availability.HasSlotGridViolation};BypassedSlotGrid={bypassedSlotGrid};" +
-            $"IgnoreAppointmentConflicts={effectiveIgnoreAppointmentConflicts};" +
-            $"HasBusinessHoursViolation={availability.HasBusinessHoursViolation};HasStaffHoursViolation={availability.HasStaffHoursViolation};" +
-            $"HasTimeOffConflict={availability.HasTimeOffConflict};HasAppointmentConflict={availability.HasAppointmentConflict};" +
-            $"BypassedWorkingHours={bypassedWorkingHours};BypassedTimeOffBlocks={bypassedTimeOffBlocks};" +
-            $"BypassedAppointmentConflicts={bypassedAppointmentConflicts};" +
-            $"WasAvailableByRules={availability.WasAvailableByRules}",
-            cancellationToken);
-
-        return Ok(new OwnerCreateAppointmentResponse
-        {
-            Id = appointment.Id,
-            BusinessId = appointment.BusinessId,
-            ServiceId = appointment.ServiceId,
-            PrimaryStaffMemberId = appointment.PrimaryStaffMemberId,
-            CustomerName = appointment.CustomerName,
-            CustomerPhone = appointment.CustomerPhone,
-            Status = appointment.Status.ToString(),
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            LegacyMasterOverride = useLegacyMasterOverride,
-            IgnoreAvailabilityRules = request.IgnoreAvailabilityRules,
-            EffectiveIgnoreWorkingHours = effectiveIgnoreWorkingHours,
-            EffectiveIgnoreTimeOffBlocks = effectiveIgnoreTimeOffBlocks,
-            EffectiveIgnoreAppointmentConflicts = effectiveIgnoreAppointmentConflicts,
-            HasBusinessHoursViolation = availability.HasBusinessHoursViolation,
-            HasStaffHoursViolation = availability.HasStaffHoursViolation,
-            HasTimeOffConflict = availability.HasTimeOffConflict,
-            HasAppointmentConflict = availability.HasAppointmentConflict,
-            BypassedWorkingHours = bypassedWorkingHours,
-            BypassedTimeOffBlocks = bypassedTimeOffBlocks,
-            BypassedAppointmentConflicts = bypassedAppointmentConflicts,
-            WasAvailableByRules = availability.WasAvailableByRules,
-            CreationMode = creationMode,
-            CreationModeLabel = creationModeLabel,
-            AppliedOverrides = appliedOverrides,
-            AppliedOverrideLabels = appliedOverrideLabels,
-            Message = BuildOwnerCreateResponseMessage(
-                availability.WasAvailableByRules,
-                bypassedSlotGrid,
-                bypassedWorkingHours,
-                bypassedTimeOffBlocks,
-                bypassedAppointmentConflicts),
-            ReasonCodes = availability.ReasonCodes
-        });
-    }
-
-    [HttpPost("approve")]
-    public async Task<ActionResult<AppointmentActionResponse>> Approve(
-[FromBody] ApproveAppointmentRequest request,
-CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        var appointment = await _dbContext.Appointments
-            .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        if (appointment.Status != AppointmentStatus.PendingApproval)
-            return BadRequest("Ovaj termin više ne čeka potvrdu.");
-
-        if (request.FinalDurationMin.HasValue)
-        {
-            if (request.FinalDurationMin.Value <= 0)
-                return BadRequest("Trajanje termina mora biti veće od 0 minuta.");
-
-            if (request.FinalDurationMin.Value % 5 != 0)
-                return BadRequest("Trajanje termina mora biti zadato u koracima od 5 minuta.");
-
-            if (!appointment.PrimaryStaffMemberId.HasValue)
-                return BadRequest("Za potvrdu termina je potrebno da termin ima izabranog zaposlenog.");
-
-            var proposedEndAtUtc = appointment.StartAtUtc.AddMinutes(request.FinalDurationMin.Value);
-
-            var availability = await IsSpecificTimeAvailableAsync(
-                appointment.BusinessId,
-                appointment.PrimaryStaffMemberId.Value,
-                appointment.StartAtUtc,
-                proposedEndAtUtc,
-                appointment.Id,
-                ignoreWorkingHours: false,
-                ignoreTimeOffBlocks: false,
-                ignoreAppointmentConflicts: false,
-                cancellationToken);
-
-            if (!availability.IsAvailable)
-                return BadRequest(availability.Message);
-
-            appointment.EndAtUtc = proposedEndAtUtc;
-            appointment.UpdatedAtUtc = DateTime.UtcNow;
-
-            var pendingRequestForDurationUpdate = await GetLatestPendingChangeRequestAsync(
-                appointment.Id,
-                cancellationToken);
-
-            if (pendingRequestForDurationUpdate is not null)
-            {
-                pendingRequestForDurationUpdate.ProposedEndAtUtc = proposedEndAtUtc;
-                pendingRequestForDurationUpdate.UpdatedAtUtc = DateTime.UtcNow;
-            }
-        }
-
-        await ApprovePendingAppointmentAsync(
-            appointment,
-            cancellationToken);
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "Approved",
-            request.FinalDurationMin.HasValue
-                ? $"Termin je potvrđen. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                : "Termin je potvrđen.",
-            null,
-            $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};FinalDurationMin={request.FinalDurationMin}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "Approved",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = request.FinalDurationMin.HasValue
-                ? $"Termin je potvrđen. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                : "Termin je potvrđen."
-        });
-    }
-    [HttpPost("reject")]
-    public async Task<ActionResult<AppointmentActionResponse>> Reject(
-    [FromBody] RejectAppointmentRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-        var appointment = await _dbContext.Appointments
-            .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        if (appointment.Status != AppointmentStatus.PendingApproval)
-            return BadRequest("Ovaj termin više ne čeka potvrdu.");
-
-        await RejectPendingAppointmentAsync(
-    appointment,
-    request.Reason,
-    cancellationToken);
-        await AddAuditLogAsync(
-    appointment.Id,
-    "Rejected",
-    request.Reason?.Trim() ?? "Termin je odbijen.",
-    null,
-    $"Status={appointment.Status}",
-    cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Message = "Termin je odbijen."
-        });
-    }
-
-    [HttpPost("propose-time")]
-    public async Task<ActionResult<AppointmentChangeActionResponse>> ProposeTime(
- [FromBody] ProposeAppointmentTimeRequest request,
- CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        var appointment = await _dbContext.Appointments
-            .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        if (appointment.Status != AppointmentStatus.PendingApproval)
-            return BadRequest("Novi termin može da se predloži samo dok zahtev još čeka potvrdu.");
-
-        var service = await _dbContext.Services
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Id == appointment.ServiceId && x.BusinessId == appointment.BusinessId,
-                cancellationToken);
-
-        if (service is null)
-            return BadRequest("Izabrana usluga ne postoji.");
-
-        var defaultDurationMin = await GetTotalServiceDurationAsync(
-            service.Id,
-            service.EstimatedDurationMin,
-            cancellationToken);
-
-        if (request.FinalDurationMin.HasValue)
-        {
-            if (request.FinalDurationMin.Value <= 0)
-                return BadRequest("Trajanje termina mora biti veće od 0 minuta.");
-
-            if (request.FinalDurationMin.Value % 5 != 0)
-                return BadRequest("Trajanje termina mora biti zadato u koracima od 5 minuta.");
-        }
-
-        if (!appointment.PrimaryStaffMemberId.HasValue)
-            return BadRequest("Za predlog novog termina je potrebno da termin ima izabranog zaposlenog.");
-
-        var effectiveDurationMin = request.FinalDurationMin ?? defaultDurationMin;
-        var proposedStart = request.ProposedStartAtUtc;
-        var proposedEnd = proposedStart.AddMinutes(effectiveDurationMin);
-
-        var isAlignedToSlotGrid = await IsStartAlignedToBusinessSlotGridAsync(
-            appointment.BusinessId,
-            appointment.PrimaryStaffMemberId.Value,
-            proposedStart,
-            cancellationToken);
-
-        if (!isAlignedToSlotGrid)
-            return BadRequest("Predloženi početak termina nije na rasporedu radnje.");
-
-        var availability = await IsSpecificTimeAvailableAsync(
-            appointment.BusinessId,
-            appointment.PrimaryStaffMemberId.Value,
-            proposedStart,
-            proposedEnd,
-            appointment.Id,
-            ignoreWorkingHours: false,
-            ignoreTimeOffBlocks: false,
-            ignoreAppointmentConflicts: false,
-            cancellationToken);
-
-        if (!availability.IsAvailable)
-            return BadRequest(availability.Message);
-
-        var existingPendingRequests = await _dbContext.AppointmentChangeRequests
-            .Where(x =>
-                x.AppointmentId == appointment.Id &&
-                x.Status == AppointmentChangeRequestStatus.Pending)
-            .ToListAsync(cancellationToken);
-
-        foreach (var item in existingPendingRequests)
-        {
-            item.Status = AppointmentChangeRequestStatus.Cancelled;
-            item.RespondedAtUtc = DateTime.UtcNow;
-            item.UpdatedAtUtc = DateTime.UtcNow;
-        }
-
-        var now = DateTime.UtcNow;
-
-        var changeRequest = new AppointmentChangeRequest
-        {
-            AppointmentId = appointment.Id,
-            RequestType = AppointmentChangeRequestType.CounterProposal,
-            Status = AppointmentChangeRequestStatus.Pending,
-            InitiatedBy = ChangeInitiatorType.Business,
-            OriginalStartAtUtc = appointment.StartAtUtc,
-            OriginalEndAtUtc = appointment.EndAtUtc,
-            ProposedStartAtUtc = proposedStart,
-            ProposedEndAtUtc = proposedEnd,
-            Reason = "Business proposed a different time",
-            Message = request.Message?.Trim(),
-            ExpiresAtUtc = GetCounterProposalExpirationUtc(now),
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        };
-
-        _dbContext.AppointmentChangeRequests.Add(changeRequest);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "CounterProposalCreated",
-            request.FinalDurationMin.HasValue
-                ? request.Message?.Trim() ?? $"Predložen je novi termin sa trajanjem od {request.FinalDurationMin.Value} minuta."
-                : request.Message?.Trim() ?? "Predložen je novi termin.",
-            $"OldStart={appointment.StartAtUtc:o};OldEnd={appointment.EndAtUtc:o}",
-            $"ProposedStart={changeRequest.ProposedStartAtUtc:o};ProposedEnd={changeRequest.ProposedEndAtUtc:o};FinalDurationMin={request.FinalDurationMin};EffectiveDurationMin={effectiveDurationMin}",
-            cancellationToken);
-
-        return Ok(new AppointmentChangeActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            ChangeRequestId = changeRequest.Id,
-            ChangeRequestStatus = changeRequest.Status.ToString(),
-            StartAtUtc = changeRequest.ProposedStartAtUtc,
-            EndAtUtc = changeRequest.ProposedEndAtUtc,
-            DurationMin = (int)(changeRequest.ProposedEndAtUtc - changeRequest.ProposedStartAtUtc).TotalMinutes,
-            Message = request.FinalDurationMin.HasValue
-                ? $"Predložen je novi termin sa trajanjem od {request.FinalDurationMin.Value} minuta."
-                : "Predložen je novi termin."
-        });
-    }
 
     [HttpPost("accept-proposal")]
+    [ProducesResponseType(typeof(AppointmentChangeActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AppointmentChangeActionResponse>> AcceptProposal(
     [FromBody] AcceptAppointmentProposalRequest request,
     CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(cancellationToken);
+
         var appointment = await _dbContext.Appointments
             .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
 
         if (appointment is null)
-            return NotFound("Termin ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
 
         var changeRequest = await _dbContext.AppointmentChangeRequests
             .FirstOrDefaultAsync(
@@ -678,10 +309,27 @@ CancellationToken cancellationToken)
                 cancellationToken);
 
         if (changeRequest is null)
-            return NotFound("Predlog promene ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Predlog promene ne postoji.",
+                "counter_proposal_not_found"));
+        }
 
         if (changeRequest.Status != AppointmentChangeRequestStatus.Pending)
-            return BadRequest(GetInactiveChangeRequestMessage(changeRequest, "Predlog termina"));
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                GetInactiveChangeRequestMessage(changeRequest, "Predlog termina"),
+                GetChangeRequestReasonCode(changeRequest, "counter_proposal")));
+        }
+
+        var scheduleValidationError = await ValidateAcceptedScheduleAsync(
+            appointment,
+            changeRequest.ProposedStartAtUtc,
+            changeRequest.ProposedEndAtUtc,
+            cancellationToken);
+
+        if (scheduleValidationError is not null)
+            return BadRequest(BuildAppointmentOperationErrorResponse(scheduleValidationError));
 
         appointment.StartAtUtc = changeRequest.ProposedStartAtUtc;
         appointment.EndAtUtc = changeRequest.ProposedEndAtUtc;
@@ -693,13 +341,33 @@ CancellationToken cancellationToken)
         changeRequest.UpdatedAtUtc = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (appointment.PrimaryStaffMemberId.HasValue)
+        {
+            await _appointmentSchedulingService.CreateAppointmentStaffUsagesAsync(
+                appointment.Id,
+                appointment.BusinessId,
+                appointment.ServiceId,
+                appointment.PrimaryStaffMemberId.Value,
+                appointment.StartAtUtc,
+                appointment.EndAtUtc,
+                cancellationToken);
+        }
+
         await AddAuditLogAsync(
-    appointment.Id,
-    "CounterProposalAccepted",
-    "Klijent je prihvatio novi termin.",
-    null,
-    $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};Status={appointment.Status}",
+                    appointment.Id,
+            "CounterProposalAccepted",
+            "Klijent je prihvatio novi termin.",
+            null,
+            $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};Status={appointment.Status}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerAcceptedProposalToBusinessAsync(
+    appointment,
+    changeRequest,
     cancellationToken);
+
+
 
         return Ok(new AppointmentChangeActionResponse
         {
@@ -715,16 +383,24 @@ CancellationToken cancellationToken)
     }
 
     [HttpPost("reject-proposal")]
+    [ProducesResponseType(typeof(AppointmentChangeActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AppointmentChangeActionResponse>> RejectProposal(
     [FromBody] RejectAppointmentProposalRequest request,
     CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(cancellationToken);
+
         var appointment = await _dbContext.Appointments
             .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
 
         if (appointment is null)
-            return NotFound("Termin ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
 
         var changeRequest = await _dbContext.AppointmentChangeRequests
             .FirstOrDefaultAsync(
@@ -732,10 +408,18 @@ CancellationToken cancellationToken)
                 cancellationToken);
 
         if (changeRequest is null)
-            return NotFound("Predlog promene ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Predlog promene ne postoji.",
+                "counter_proposal_not_found"));
+        }
 
         if (changeRequest.Status != AppointmentChangeRequestStatus.Pending)
-            return BadRequest(GetInactiveChangeRequestMessage(changeRequest, "Predlog termina"));
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                GetInactiveChangeRequestMessage(changeRequest, "Predlog termina"),
+                GetChangeRequestReasonCode(changeRequest, "counter_proposal")));
+        }
 
         changeRequest.Status = AppointmentChangeRequestStatus.Rejected;
         changeRequest.Reason = request.Reason?.Trim();
@@ -746,12 +430,30 @@ CancellationToken cancellationToken)
         appointment.UpdatedAtUtc = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (appointment.PrimaryStaffMemberId.HasValue)
+        {
+            await _appointmentSchedulingService.CreateAppointmentStaffUsagesAsync(
+                appointment.Id,
+                appointment.BusinessId,
+                appointment.ServiceId,
+                appointment.PrimaryStaffMemberId.Value,
+                appointment.StartAtUtc,
+                appointment.EndAtUtc,
+                cancellationToken);
+        }
+
         await AddAuditLogAsync(
-    appointment.Id,
-    "CounterProposalRejected",
-    request.Reason?.Trim() ?? "Klijent je odbio novi termin.",
-    null,
-    $"Status={appointment.Status}",
+                    appointment.Id,
+            "CounterProposalRejected",
+            request.Reason?.Trim() ?? "Klijent je odbio novi termin.",
+            null,
+            $"Status={appointment.Status}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerRejectedProposalToBusinessAsync(
+    appointment,
+    changeRequest,
     cancellationToken);
 
         return Ok(new AppointmentChangeActionResponse
@@ -767,83 +469,233 @@ CancellationToken cancellationToken)
         });
     }
 
-    [HttpGet("change-requests")]
-    public async Task<ActionResult<List<AppointmentChangeRequestItemResponse>>> GetChangeRequests(
-    [FromQuery] long appointmentId,
+    [HttpPost("cancel-confirmed")]
+    [ProducesResponseType(typeof(AppointmentActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AppointmentActionResponse>> CancelConfirmed(
+    [FromBody] CancelConfirmedAppointmentRequest request,
     CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(cancellationToken);
 
-        var items = await _dbContext.AppointmentChangeRequests
-            .AsNoTracking()
-            .Where(x => x.AppointmentId == appointmentId)
-            .OrderBy(x => x.CreatedAtUtc)
-.Select(x => new AppointmentChangeRequestItemResponse
-{
-    Id = x.Id,
-    AppointmentId = x.AppointmentId,
-    RequestType = x.RequestType.ToString(),
-    Status = x.Status.ToString(),
-    InitiatedBy = x.InitiatedBy.ToString(),
-    OriginalStartAtUtc = x.OriginalStartAtUtc,
-    OriginalEndAtUtc = x.OriginalEndAtUtc,
-    ProposedStartAtUtc = x.ProposedStartAtUtc,
-    ProposedEndAtUtc = x.ProposedEndAtUtc,
-    Reason = x.Reason,
-    Message = x.Message,
-    CreatedAtUtc = x.CreatedAtUtc,
-    ExpiresAtUtc = x.ExpiresAtUtc,
-    RespondedAtUtc = x.RespondedAtUtc
-})
-            .ToListAsync(cancellationToken);
-
-        return Ok(items);
-    }
-
-    [HttpPost("propose-delay")]
-    public async Task<ActionResult<AppointmentChangeActionResponse>> ProposeDelay(
-    [FromBody] ProposeDelayRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
         var appointment = await _dbContext.Appointments
             .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
 
         if (appointment is null)
-            return NotFound("Termin ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
 
         if (appointment.Status != AppointmentStatus.Confirmed)
-            return BadRequest("Pomeranje može da se predloži samo za potvrđen termin.");
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Samo potvrđen termin može da se otkaže.",
+                "appointment_not_confirmed"));
+        }
 
-        if (request.DelayMinutes <= 0)
-            return BadRequest("Pomeranje mora biti veće od 0 minuta.");
+        var now = DateTime.UtcNow;
 
-        var proposedStart = appointment.StartAtUtc.AddMinutes(request.DelayMinutes);
-        var proposedEnd = appointment.EndAtUtc.AddMinutes(request.DelayMinutes);
+        appointment.Status = AppointmentStatus.Cancelled;
+        appointment.UpdatedAtUtc = now;
 
-        var hasConflict = await _dbContext.Appointments
+        var pendingRequests = await _dbContext.AppointmentChangeRequests
+            .Where(x =>
+                x.AppointmentId == appointment.Id &&
+                x.Status == AppointmentChangeRequestStatus.Pending)
+            .ToListAsync(cancellationToken);
+
+        foreach (var pendingRequest in pendingRequests)
+        {
+            pendingRequest.Status = AppointmentChangeRequestStatus.Cancelled;
+            pendingRequest.Reason = request.Reason?.Trim();
+            pendingRequest.RespondedAtUtc = now;
+            pendingRequest.UpdatedAtUtc = now;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await AddAuditLogAsync(
+            appointment.Id,
+            "CancelledByCustomer",
+            string.IsNullOrWhiteSpace(request.Reason)
+                ? "Klijent je otkazao potvrđen termin."
+                : $"Klijent je otkazao potvrđen termin. Razlog: {request.Reason!.Trim()}",
+            $"Status={AppointmentStatus.Confirmed};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerCancelledAppointmentToBusinessAsync(
+    appointment,
+    request.Reason,
+    cancellationToken);
+
+        return Ok(new AppointmentActionResponse
+        {
+            AppointmentId = appointment.Id,
+            AppointmentStatus = appointment.Status.ToString(),
+            Action = "CancelledByCustomer",
+            StartAtUtc = appointment.StartAtUtc,
+            EndAtUtc = appointment.EndAtUtc,
+            Message = "Termin je uspešno otkazan."
+        });
+    }
+
+    [HttpPost("withdraw-request")]
+    [ProducesResponseType(typeof(AppointmentActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AppointmentActionResponse>> WithdrawRequest(
+    [FromBody] WithdrawAppointmentRequest request,
+    CancellationToken cancellationToken)
+    {
+        await ExpirePendingRequestsAsync(cancellationToken);
+
+        var appointment = await _dbContext.Appointments
+            .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
+
+        if (appointment is null)
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
+
+        if (appointment.Status != AppointmentStatus.PendingApproval)
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Samo zahtev koji čeka odobrenje može da se povuče.",
+                "appointment_not_pending_approval"));
+        }
+
+        var userId = TryGetCurrentUserId();
+
+        if (!userId.HasValue)
+            return Unauthorized("Korisnik nije autentifikovan.");
+
+        var customerProfile = await _dbContext.CustomerProfiles
             .AsNoTracking()
-            .AnyAsync(x =>
-                x.Id != appointment.Id &&
-                x.BusinessId == appointment.BusinessId &&
-                x.PrimaryStaffMemberId == appointment.PrimaryStaffMemberId &&
-                x.Status != AppointmentStatus.Cancelled &&
-                x.Status != AppointmentStatus.Rejected &&
-                x.StartAtUtc < proposedEnd &&
-                x.EndAtUtc > proposedStart,
+            .FirstOrDefaultAsync(
+                x => x.AppUserId == userId.Value,
                 cancellationToken);
 
-        if (hasConflict)
-            return BadRequest("Predloženo pomeranje upada u drugi zauzet termin.");
+        if (customerProfile is null)
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Korisnik nema povezan klijent profil.",
+                "customer_profile_not_found"));
+        }
 
-        var existingPendingDelayRequests = await _dbContext.AppointmentChangeRequests
+        var hasCustomerAccess = await _dbContext.BusinessCustomers
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Id == appointment.BusinessCustomerId &&
+                     x.BusinessId == appointment.BusinessId &&
+                     x.CustomerProfileId == customerProfile.Id &&
+                     x.IsActive,
+                cancellationToken);
+
+        if (!hasCustomerAccess)
+            return Forbid();
+
+        var now = DateTime.UtcNow;
+
+        appointment.Status = AppointmentStatus.Cancelled;
+        appointment.UpdatedAtUtc = now;
+
+        var pendingRequests = await _dbContext.AppointmentChangeRequests
+            .Where(x =>
+                x.AppointmentId == appointment.Id &&
+                x.Status == AppointmentChangeRequestStatus.Pending)
+            .ToListAsync(cancellationToken);
+
+        foreach (var pendingRequest in pendingRequests)
+        {
+            pendingRequest.Status = AppointmentChangeRequestStatus.Cancelled;
+            pendingRequest.Reason = string.IsNullOrWhiteSpace(request.Reason)
+                ? "Klijent je povukao zahtev za termin."
+                : request.Reason.Trim();
+            pendingRequest.RespondedAtUtc = now;
+            pendingRequest.UpdatedAtUtc = now;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await AddAuditLogAsync(
+            appointment.Id,
+            "WithdrawnByCustomer",
+            string.IsNullOrWhiteSpace(request.Reason)
+                ? "Klijent je povukao zahtev za termin."
+                : $"Klijent je povukao zahtev za termin. Razlog: {request.Reason.Trim()}",
+            $"Status={AppointmentStatus.PendingApproval};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerWithdrawnAppointmentRequestToBusinessAsync(
+    appointment,
+    request.Reason,
+    cancellationToken);
+
+        return Ok(new AppointmentActionResponse
+        {
+            AppointmentId = appointment.Id,
+            AppointmentStatus = appointment.Status.ToString(),
+            Action = "WithdrawnByCustomer",
+            StartAtUtc = appointment.StartAtUtc,
+            EndAtUtc = appointment.EndAtUtc,
+            Message = "Zahtev za termin je povučen."
+        });
+    }
+
+    [HttpPost("request-reschedule")]
+    [ProducesResponseType(typeof(AppointmentChangeActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AppointmentChangeActionResponse>> RequestReschedule(
+    [FromBody] RequestAppointmentRescheduleRequest request,
+    CancellationToken cancellationToken)
+    {
+        await ExpirePendingRequestsAsync(cancellationToken);
+
+        var appointment = await _dbContext.Appointments
+            .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
+
+        if (appointment is null)
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
+
+        if (appointment.Status != AppointmentStatus.Confirmed)
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Promena termina može da se traži samo za potvrđen termin.",
+                "appointment_not_confirmed"));
+        }
+
+        var proposedStart = request.ProposedStartAtUtc;
+        var proposedEnd = proposedStart.AddMinutes((appointment.EndAtUtc - appointment.StartAtUtc).TotalMinutes);
+
+        var scheduleValidationError = await ValidateAcceptedScheduleAsync(
+            appointment,
+            proposedStart,
+            proposedEnd,
+            cancellationToken);
+
+        if (scheduleValidationError is not null)
+            return BadRequest(BuildAppointmentOperationErrorResponse(scheduleValidationError));
+
+        var existingPendingRescheduleRequests = await _dbContext.AppointmentChangeRequests
             .Where(x =>
                 x.AppointmentId == appointment.Id &&
                 x.Status == AppointmentChangeRequestStatus.Pending &&
-                x.RequestType == AppointmentChangeRequestType.DelayProposal)
+                x.RequestType == AppointmentChangeRequestType.RescheduleRequest)
             .ToListAsync(cancellationToken);
 
-        foreach (var item in existingPendingDelayRequests)
+        foreach (var item in existingPendingRescheduleRequests)
         {
             item.Status = AppointmentChangeRequestStatus.Cancelled;
             item.RespondedAtUtc = DateTime.UtcNow;
@@ -855,28 +707,34 @@ CancellationToken cancellationToken)
         var changeRequest = new AppointmentChangeRequest
         {
             AppointmentId = appointment.Id,
-            RequestType = AppointmentChangeRequestType.DelayProposal,
+            RequestType = AppointmentChangeRequestType.RescheduleRequest,
             Status = AppointmentChangeRequestStatus.Pending,
-            InitiatedBy = ChangeInitiatorType.Business,
+            InitiatedBy = ChangeInitiatorType.Customer,
             OriginalStartAtUtc = appointment.StartAtUtc,
             OriginalEndAtUtc = appointment.EndAtUtc,
             ProposedStartAtUtc = proposedStart,
             ProposedEndAtUtc = proposedEnd,
-            Reason = "Delay proposal",
+            Reason = "Customer requested reschedule",
             Message = request.Message?.Trim(),
-            ExpiresAtUtc = GetDelayProposalExpirationUtc(now),
+            ExpiresAtUtc = GetConfirmedRescheduleRequestExpirationUtc(now),
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
 
         _dbContext.AppointmentChangeRequests.Add(changeRequest);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
         await AddAuditLogAsync(
-    appointment.Id,
-    "DelayProposalCreated",
-    request.Message?.Trim() ?? $"Predloženo je pomeranje termina za {request.DelayMinutes} minuta.",
-    $"OldStart={appointment.StartAtUtc:o};OldEnd={appointment.EndAtUtc:o}",
-    $"ProposedStart={changeRequest.ProposedStartAtUtc:o};ProposedEnd={changeRequest.ProposedEndAtUtc:o}",
+            appointment.Id,
+            "RescheduleRequestedByCustomer",
+            request.Message?.Trim() ?? "Klijent je zatražio promenu termina.",
+            $"OldStart={appointment.StartAtUtc:o};OldEnd={appointment.EndAtUtc:o}",
+            $"ProposedStart={changeRequest.ProposedStartAtUtc:o};ProposedEnd={changeRequest.ProposedEndAtUtc:o}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerRequestedRescheduleToBusinessAsync(
+    appointment,
+    changeRequest,
     cancellationToken);
 
         return Ok(new AppointmentChangeActionResponse
@@ -888,24 +746,36 @@ CancellationToken cancellationToken)
             StartAtUtc = changeRequest.ProposedStartAtUtc,
             EndAtUtc = changeRequest.ProposedEndAtUtc,
             DurationMin = (int)(changeRequest.ProposedEndAtUtc - changeRequest.ProposedStartAtUtc).TotalMinutes,
-            Message = "Predloženo je pomeranje termina."
+            Message = "Zahtev za promenu termina je uspešno poslat."
         });
     }
 
     [HttpPost("accept-delay")]
+    [ProducesResponseType(typeof(AppointmentChangeActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AppointmentChangeActionResponse>> AcceptDelay(
-    [FromBody] AcceptDelayProposalRequest request,
-    CancellationToken cancellationToken)
+     [FromBody] AcceptDelayProposalRequest request,
+     CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(cancellationToken);
+
         var appointment = await _dbContext.Appointments
             .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
 
         if (appointment is null)
-            return NotFound("Termin ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
 
         if (appointment.Status != AppointmentStatus.Confirmed)
-            return BadRequest("Ovaj termin nije potvrđen.");
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Ovaj termin nije potvrđen.",
+                "appointment_not_confirmed"));
+        }
 
         var changeRequest = await _dbContext.AppointmentChangeRequests
             .FirstOrDefaultAsync(
@@ -915,26 +785,56 @@ CancellationToken cancellationToken)
                 cancellationToken);
 
         if (changeRequest is null)
-            return NotFound("Predlog pomeranja ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Predlog pomeranja ne postoji.",
+                "delay_proposal_not_found"));
+        }
 
         if (changeRequest.Status != AppointmentChangeRequestStatus.Pending)
-            return BadRequest(GetInactiveChangeRequestMessage(changeRequest, "Predlog pomeranja"));
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                GetInactiveChangeRequestMessage(changeRequest, "Predlog pomeranja"),
+                GetChangeRequestReasonCode(changeRequest, "delay_proposal")));
+        }
+
+        var scheduleValidationError = await ValidateAcceptedDelayScheduleAsync(
+            appointment,
+            changeRequest.ProposedStartAtUtc,
+            changeRequest.ProposedEndAtUtc,
+            cancellationToken);
+
+        if (scheduleValidationError is not null)
+            return BadRequest(BuildAppointmentOperationErrorResponse(scheduleValidationError));
+
+        var now = DateTime.UtcNow;
 
         appointment.StartAtUtc = changeRequest.ProposedStartAtUtc;
         appointment.EndAtUtc = changeRequest.ProposedEndAtUtc;
-        appointment.UpdatedAtUtc = DateTime.UtcNow;
+        appointment.UpdatedAtUtc = now;
 
         changeRequest.Status = AppointmentChangeRequestStatus.Accepted;
-        changeRequest.RespondedAtUtc = DateTime.UtcNow;
-        changeRequest.UpdatedAtUtc = DateTime.UtcNow;
+        changeRequest.RespondedAtUtc = now;
+        changeRequest.UpdatedAtUtc = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
         await AddAuditLogAsync(
-    appointment.Id,
-    "DelayProposalAccepted",
-    "Klijent je prihvatio pomeranje termina.",
-    null,
-    $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            appointment.Id,
+            "DelayProposalAccepted",
+            "Klijent je prihvatio pomeranje termina.",
+            null,
+            $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerAcceptedProposalToBusinessAsync(
+            appointment,
+            changeRequest,
+            cancellationToken);
+
+        await _chatSystemMessageService.SendDelayAcceptedToCustomerAsync(
+    appointment,
+    changeRequest,
     cancellationToken);
 
         return Ok(new AppointmentChangeActionResponse
@@ -951,19 +851,31 @@ CancellationToken cancellationToken)
     }
 
     [HttpPost("reject-delay")]
+    [ProducesResponseType(typeof(AppointmentChangeActionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AppointmentOperationErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AppointmentChangeActionResponse>> RejectDelay(
-    [FromBody] RejectDelayProposalRequest request,
-    CancellationToken cancellationToken)
+     [FromBody] RejectDelayProposalRequest request,
+     CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(cancellationToken);
+
         var appointment = await _dbContext.Appointments
             .FirstOrDefaultAsync(x => x.Id == request.AppointmentId, cancellationToken);
 
         if (appointment is null)
-            return NotFound("Termin ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Termin ne postoji.",
+                "appointment_not_found"));
+        }
 
         if (appointment.Status != AppointmentStatus.Confirmed)
-            return BadRequest("Ovaj termin nije potvrđen.");
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                "Ovaj termin nije potvrđen.",
+                "appointment_not_confirmed"));
+        }
 
         var changeRequest = await _dbContext.AppointmentChangeRequests
             .FirstOrDefaultAsync(
@@ -973,23 +885,44 @@ CancellationToken cancellationToken)
                 cancellationToken);
 
         if (changeRequest is null)
-            return NotFound("Predlog pomeranja ne postoji.");
+        {
+            return NotFound(BuildAppointmentOperationErrorResponse(
+                "Predlog pomeranja ne postoji.",
+                "delay_proposal_not_found"));
+        }
 
         if (changeRequest.Status != AppointmentChangeRequestStatus.Pending)
-            return BadRequest(GetInactiveChangeRequestMessage(changeRequest, "Predlog pomeranja"));
+        {
+            return BadRequest(BuildAppointmentOperationErrorResponse(
+                GetInactiveChangeRequestMessage(changeRequest, "Predlog pomeranja"),
+                GetChangeRequestReasonCode(changeRequest, "delay_proposal")));
+        }
+
+        var now = DateTime.UtcNow;
 
         changeRequest.Status = AppointmentChangeRequestStatus.Rejected;
         changeRequest.Reason = request.Reason?.Trim();
-        changeRequest.RespondedAtUtc = DateTime.UtcNow;
-        changeRequest.UpdatedAtUtc = DateTime.UtcNow;
+        changeRequest.RespondedAtUtc = now;
+        changeRequest.UpdatedAtUtc = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
         await AddAuditLogAsync(
-    appointment.Id,
-    "DelayProposalRejected",
-    request.Reason?.Trim() ?? "Klijent je odbio predlog pomeranja.",
-    null,
-    $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            appointment.Id,
+            "DelayProposalRejected",
+            request.Reason?.Trim() ?? "Klijent je odbio predlog pomeranja.",
+            null,
+            $"Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
+            cancellationToken);
+
+        await _chatSystemMessageService.SendCustomerRejectedProposalToBusinessAsync(
+            appointment,
+            changeRequest,
+            cancellationToken);
+
+        await _chatSystemMessageService.SendDelayRejectedToCustomerAsync(
+    appointment,
+    changeRequest,
     cancellationToken);
 
         return Ok(new AppointmentChangeActionResponse
@@ -1005,546 +938,6 @@ CancellationToken cancellationToken)
         });
     }
 
-    [HttpPost("mark-call-customer")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkCallCustomer(
-    [FromBody] MarkCallCustomerRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Za ovaj termin više nije potrebno pozivanje klijenta.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        var message = BuildOwnerCallMessage(
-            "Potrebno je pozvati klijenta.",
-            request.Note);
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "CallCustomerMarked",
-            message,
-            null,
-            $"Status={appointment.Status};CustomerName={appointment.CustomerName};CustomerPhone={appointment.CustomerPhone}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "CallCustomerMarked",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = "Označeno je da klijenta treba pozvati."
-        });
-    }
-
-    [HttpPost("mark-no-answer")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkNoAnswer(
-    [FromBody] MarkAppointmentCallActionRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Ova radnja više nije moguća jer termin nije aktivan.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        var message = BuildOwnerCallMessage(
-            "Klijent se nije javio na poziv.",
-    request.Note);
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "CustomerCallNoAnswer",
-            message,
-            null,
-            $"Status={appointment.Status};CustomerName={appointment.CustomerName};CustomerPhone={appointment.CustomerPhone}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "CustomerCallNoAnswer",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = "Zabeleženo je da se klijent nije javio."
-        });
-    }
-
-    [HttpPost("mark-called-confirmed")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkCalledConfirmed(
-[FromBody] MarkAppointmentCallActionRequest request,
-CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Potvrda pozivom više nije moguća jer termin nije aktivan.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        if (request.FinalDurationMin.HasValue)
-        {
-            if (request.FinalDurationMin.Value <= 0)
-                return BadRequest("Trajanje termina mora biti veće od 0 minuta.");
-
-            if (request.FinalDurationMin.Value % 5 != 0)
-                return BadRequest("Trajanje termina mora biti zadato u koracima od 5 minuta.");
-
-            if (!appointment.PrimaryStaffMemberId.HasValue)
-                return BadRequest("Za potvrdu termina je potrebno da termin ima izabranog zaposlenog.");
-
-            var proposedEndAtUtc = appointment.StartAtUtc.AddMinutes(request.FinalDurationMin.Value);
-
-            var availability = await IsSpecificTimeAvailableAsync(
-                appointment.BusinessId,
-                appointment.PrimaryStaffMemberId.Value,
-                appointment.StartAtUtc,
-                proposedEndAtUtc,
-                appointment.Id,
-                ignoreWorkingHours: false,
-                ignoreTimeOffBlocks: false,
-                ignoreAppointmentConflicts: false,
-                cancellationToken);
-
-            if (!availability.IsAvailable)
-                return BadRequest(availability.Message);
-
-            appointment.EndAtUtc = proposedEndAtUtc;
-            appointment.UpdatedAtUtc = DateTime.UtcNow;
-
-            var pendingRequestForDurationUpdate = await GetLatestPendingChangeRequestAsync(
-                appointment.Id,
-                cancellationToken);
-
-            if (pendingRequestForDurationUpdate is not null)
-            {
-                pendingRequestForDurationUpdate.ProposedEndAtUtc = proposedEndAtUtc;
-                pendingRequestForDurationUpdate.UpdatedAtUtc = DateTime.UtcNow;
-            }
-        }
-
-        var note = request.Note?.Trim();
-
-        if (appointment.Status == AppointmentStatus.PendingApproval)
-        {
-            await ApprovePendingAppointmentAsync(
-                appointment,
-                cancellationToken);
-
-            await AddAuditLogAsync(
-                appointment.Id,
-                "ConfirmedByPhoneCall",
-                BuildOwnerCallMessage(
-                    request.FinalDurationMin.HasValue
-                        ? $"Termin je potvrđen telefonom. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                        : "Termin je potvrđen telefonom.",
-                    note),
-                null,
-                $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};FinalDurationMin={request.FinalDurationMin}",
-                cancellationToken);
-
-            return Ok(new AppointmentActionResponse
-            {
-                AppointmentId = appointment.Id,
-                AppointmentStatus = appointment.Status.ToString(),
-                Action = "ConfirmedByPhoneCall",
-                StartAtUtc = appointment.StartAtUtc,
-                EndAtUtc = appointment.EndAtUtc,
-                Message = request.FinalDurationMin.HasValue
-                    ? $"Termin je potvrđen telefonom. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                    : "Termin je potvrđen telefonom."
-            });
-        }
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "ConfirmedByPhoneCall",
-            BuildOwnerCallMessage(
-                request.FinalDurationMin.HasValue
-                    ? $"Klijent je potvrdio termin telefonom. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                    : "Klijent je potvrdio termin telefonom.",
-                note),
-            null,
-            $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o};FinalDurationMin={request.FinalDurationMin}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "ConfirmedByPhoneCall",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = request.FinalDurationMin.HasValue
-                ? $"Termin je potvrđen telefonom. Trajanje je postavljeno na {request.FinalDurationMin.Value} minuta."
-                : "Termin je potvrđen telefonom."
-        });
-    }
-
-    [HttpPost("mark-called-rejected")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkCalledRejected(
-    [FromBody] MarkAppointmentCallActionRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Odbijanje pozivom više nije moguće jer termin nije aktivan.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        if (appointment.Status != AppointmentStatus.PendingApproval)
-            return BadRequest("Odbijanje pozivom je moguće samo dok termin još čeka potvrdu.");
-
-        var now = DateTime.UtcNow;
-        var note = request.Note?.Trim();
-
-        await RejectPendingAppointmentAsync(
-            appointment,
-            note,
-            cancellationToken);
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "RejectedByPhoneCall",
-            BuildOwnerCallMessage(
-"Termin je odbijen nakon razgovora sa klijentom.",
-    note),
-            null,
-            $"Status={appointment.Status}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "RejectedByPhoneCall",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = "Termin je odbijen nakon razgovora sa klijentom."
-        });
-    }
-
-    [HttpPost("mark-called-reschedule-needed")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkCalledRescheduleNeeded(
-    [FromBody] MarkAppointmentCallActionRequest request,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Ova radnja više nije moguća jer termin nije aktivan.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        var note = request.Note?.Trim();
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "RescheduleNeededAfterCall",
-            BuildOwnerCallMessage(
-"Potrebno je dogovoriti novi termin.",
-    note),
-            null,
-            $"Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "RescheduleNeededAfterCall",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            Message = "Potrebno je dogovoriti novi termin."
-        });
-    }
-
-    [HttpPost("mark-call-attempt-scheduled")]
-    public async Task<ActionResult<AppointmentActionResponse>> MarkCallAttemptScheduled(
-     [FromBody] ScheduleCallAttemptRequest request,
-     CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        if (request.ScheduledAtUtc <= DateTime.UtcNow)
-            return BadRequest("Vreme novog poziva mora biti u budućnosti.");
-
-        Appointment? appointment;
-
-        try
-        {
-            appointment = await GetActiveAppointmentForOwnerCallActionAsync(
-                request.AppointmentId,
-                "Novi pokušaj poziva ne može da se zakaže jer termin nije aktivan.",
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-
-        if (appointment is null)
-            return NotFound("Termin ne postoji.");
-
-        var note = request.Note?.Trim();
-
-        await AddAuditLogAsync(
-            appointment.Id,
-            "CallAttemptScheduled",
-            BuildOwnerCallMessage(
-                "Zakazan je novi poziv klijentu.",
-                note),
-            null,
-            $"ScheduledAtUtc={request.ScheduledAtUtc:o};Status={appointment.Status};Start={appointment.StartAtUtc:o};End={appointment.EndAtUtc:o}",
-            cancellationToken);
-
-        return Ok(new AppointmentActionResponse
-        {
-            AppointmentId = appointment.Id,
-            AppointmentStatus = appointment.Status.ToString(),
-            Action = "CallAttemptScheduled",
-            StartAtUtc = appointment.StartAtUtc,
-            EndAtUtc = appointment.EndAtUtc,
-            ScheduledAtUtc = request.ScheduledAtUtc,
-            Message = "Zakazan je novi poziv klijentu."
-        });
-    }
-
-    [HttpGet("audit-log")]
-    public async Task<ActionResult<List<AppointmentAuditLogItemResponse>>> GetAuditLog(
-    [FromQuery] long appointmentId,
-    CancellationToken cancellationToken)
-    {
-        var items = await _dbContext.AppointmentAuditLogs
-            .AsNoTracking()
-            .Where(x => x.AppointmentId == appointmentId)
-            .OrderBy(x => x.CreatedAtUtc)
-.Select(x => new AppointmentAuditLogItemResponse
-{
-    Id = x.Id,
-    AppointmentId = x.AppointmentId,
-    ActionType = x.ActionType,
-    Message = x.Message,
-    OldValuesJson = x.OldValuesJson,
-    NewValuesJson = x.NewValuesJson,
-    CreatedAtUtc = x.CreatedAtUtc
-})
-            .ToListAsync(cancellationToken);
-
-        return Ok(items);
-    }
-
-    [HttpGet("inbox")]
-    public async Task<ActionResult<List<AppointmentInboxItemDto>>> GetInbox(
-    [FromQuery] long businessId,
-    CancellationToken cancellationToken)
-    {
-        await ExpirePendingRequestsAsync(cancellationToken);
-
-        var appointments = await _dbContext.Appointments
-            .AsNoTracking()
-            .Where(x =>
-                x.BusinessId == businessId &&
-                (x.Status == AppointmentStatus.PendingApproval || x.Status == AppointmentStatus.Confirmed))
-            .OrderBy(x => x.StartAtUtc)
-            .ToListAsync(cancellationToken);
-
-        var appointmentIds = appointments.Select(x => x.Id).ToList();
-
-        var pendingChangeRequests = await _dbContext.AppointmentChangeRequests
-            .AsNoTracking()
-            .Where(x =>
-                appointmentIds.Contains(x.AppointmentId) &&
-                x.Status == AppointmentChangeRequestStatus.Pending)
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
-        var ownerActionTypes = new[]
-{
-    "CallCustomerMarked",
-    "CustomerCallNoAnswer",
-    "ConfirmedByPhoneCall",
-    "RescheduleNeededAfterCall",
-    "RejectedByPhoneCall",
-    "CallAttemptScheduled"
-};
-
-        var latestOwnerActions = await _dbContext.AppointmentAuditLogs
-            .AsNoTracking()
-            .Where(x =>
-                appointmentIds.Contains(x.AppointmentId) &&
-                ownerActionTypes.Contains(x.ActionType))
-            .GroupBy(x => x.AppointmentId)
-            .Select(g => g
-                .OrderByDescending(x => x.CreatedAtUtc)
-                .Select(x => new
-                {
-                    x.AppointmentId,
-                    x.ActionType,
-                    x.CreatedAtUtc,
-                    x.NewValuesJson
-                })
-                .First())
-            .ToListAsync(cancellationToken);
-
-        var latestOwnerActionByAppointment = latestOwnerActions
-            .ToDictionary(x => x.AppointmentId, x => x);
-
-        var services = await _dbContext.Services
-            .AsNoTracking()
-            .Where(x => x.BusinessId == businessId)
-            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
-
-        var staff = await _dbContext.StaffMembers
-            .AsNoTracking()
-            .Where(x => x.BusinessId == businessId)
-            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, cancellationToken);
-
-        var latestPendingByAppointment = pendingChangeRequests
-            .GroupBy(x => x.AppointmentId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderByDescending(x => x.CreatedAtUtc).First());
-
-        var result = new List<AppointmentInboxItemDto>();
-
-        foreach (var appointment in appointments)
-        {
-            latestPendingByAppointment.TryGetValue(appointment.Id, out var pendingChange);
-
-            var shouldInclude =
-                appointment.Status == AppointmentStatus.PendingApproval ||
-                pendingChange is not null;
-
-            if (!shouldInclude)
-                continue;
-
-            services.TryGetValue(appointment.ServiceId, out var serviceName);
-
-            string? staffDisplayName = null;
-            if (appointment.PrimaryStaffMemberId.HasValue &&
-                staff.TryGetValue(appointment.PrimaryStaffMemberId.Value, out var staffName))
-            {
-                staffDisplayName = staffName;
-            }
-
-            latestOwnerActionByAppointment.TryGetValue(appointment.Id, out var latestOwnerAction);
-            var ownerWorkflowState = GetOwnerWorkflowState(
-    appointment,
-    pendingChange,
-    latestOwnerAction?.ActionType);
-            var scheduledCallAttemptAtUtc = TryExtractScheduledAtUtc(latestOwnerAction?.NewValuesJson);
-
-            result.Add(new AppointmentInboxItemDto
-            {
-                AppointmentId = appointment.Id,
-                ChangeRequestId = pendingChange?.Id,
-                CustomerName = appointment.CustomerName,
-                CustomerPhone = appointment.CustomerPhone,
-                ServiceId = appointment.ServiceId,
-                ServiceName = serviceName ?? string.Empty,
-                StaffMemberId = appointment.PrimaryStaffMemberId,
-                StaffDisplayName = staffDisplayName,
-                AppointmentStatus = appointment.Status.ToString(),
-                ChangeRequestType = pendingChange?.RequestType.ToString(),
-                ChangeRequestStatus = pendingChange?.Status.ToString(),
-                StartAtUtc = appointment.StartAtUtc,
-                EndAtUtc = appointment.EndAtUtc,
-                ProposedStartAtUtc = pendingChange?.ProposedStartAtUtc,
-                ProposedEndAtUtc = pendingChange?.ProposedEndAtUtc,
-                Message = pendingChange?.Message,
-                ExpiresAtUtc = pendingChange?.ExpiresAtUtc,
-                LastOwnerAction = latestOwnerAction?.ActionType,
-                LastOwnerActionAtUtc = latestOwnerAction?.CreatedAtUtc,
-                LastOwnerActionLabel = GetOwnerActionLabel(latestOwnerAction?.ActionType),
-                RequiresOwnerFollowUp = RequiresOwnerFollowUp(
-    appointment,
-    pendingChange,
-    latestOwnerAction?.ActionType),
-                FollowUpHint = GetFollowUpHint(
-    appointment,
-    pendingChange,
-    latestOwnerAction?.ActionType,
-    scheduledCallAttemptAtUtc),
-
-                OwnerWorkflowState = ownerWorkflowState,
-                OwnerWorkflowLabel = GetOwnerWorkflowLabel(ownerWorkflowState),
-                ScheduledCallAttemptAtUtc = scheduledCallAttemptAtUtc
-            });
-
-        }
-
-        return Ok(result
-            .OrderBy(x => x.ExpiresAtUtc ?? DateTime.MaxValue)
-            .ThenBy(x => x.StartAtUtc)
-            .ToList());
-    }
 
     private async Task AddAuditLogAsync(
     long appointmentId,
@@ -1654,491 +1047,175 @@ CancellationToken cancellationToken)
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+
+
+    private async Task<string?> ValidateServiceResourceSelectionAsync(
+    long businessId,
+    long serviceId,
+    long? resourceId,
+    CancellationToken cancellationToken)
+    {
+        var serviceResourceRequirements = await _dbContext.ServiceResourceRequirements
+            .AsNoTracking()
+            .Where(x => x.ServiceId == serviceId)
+            .ToListAsync(cancellationToken);
+
+        if (!resourceId.HasValue)
+        {
+            if (serviceResourceRequirements.Any(x => x.IsRequired))
+                return "Za izabranu uslugu je potrebno izabrati resurs.";
+
+            return null;
+        }
+
+        var resource = await _dbContext.Resources
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == resourceId.Value && x.BusinessId == businessId,
+                cancellationToken);
+
+        if (resource is null)
+            return "Izabrani resurs ne postoji.";
+
+        if (!resource.IsActive)
+            return "Izabrani resurs nije aktivan.";
+
+        var isAllowedForService = serviceResourceRequirements.Any(x => x.ResourceId == resourceId.Value);
+
+        if (!isAllowedForService)
+            return "Izabrani resurs nije dozvoljen za izabranu uslugu.";
+
+        return null;
+    }
+
+    private static AppointmentOperationErrorResponse BuildAppointmentOperationErrorResponse(
+    string message,
+    string reasonCode,
+    bool hasSlotGridViolation = false,
+    bool hasBusinessHoursViolation = false,
+    bool hasStaffHoursViolation = false,
+    bool hasTimeOffConflict = false,
+    bool hasAppointmentConflict = false,
+    bool hasResourceConflict = false)
+    {
+        return new AppointmentOperationErrorResponse
+        {
+            Message = message,
+            ReasonCode = reasonCode,
+            ReasonCodes = string.IsNullOrWhiteSpace(reasonCode)
+                ? new List<string>()
+                : new List<string> { reasonCode },
+            HasSlotGridViolation = hasSlotGridViolation,
+            HasBusinessHoursViolation = hasBusinessHoursViolation,
+            HasStaffHoursViolation = hasStaffHoursViolation,
+            HasTimeOffConflict = hasTimeOffConflict,
+            HasAppointmentConflict = hasAppointmentConflict,
+            HasResourceConflict = hasResourceConflict
+        };
+    }
+
+    private static AppointmentOperationErrorResponse BuildAppointmentOperationErrorResponse(
+        OwnerCreateAvailabilityResult availability)
+    {
+        return new AppointmentOperationErrorResponse
+        {
+            Message = availability.Message,
+            ReasonCode = availability.ReasonCode,
+            ReasonCodes = availability.ReasonCodes,
+            HasSlotGridViolation = availability.HasSlotGridViolation,
+            HasBusinessHoursViolation = availability.HasBusinessHoursViolation,
+            HasStaffHoursViolation = availability.HasStaffHoursViolation,
+            HasTimeOffConflict = availability.HasTimeOffConflict,
+            HasAppointmentConflict = availability.HasAppointmentConflict,
+            HasResourceConflict = availability.HasResourceConflict
+        };
+    }
+
+    private async Task<OwnerCreateAvailabilityResult> CheckAvailabilityViaServiceAsync(
+     long businessId,
+     long serviceId,
+     long staffMemberId,
+     long? resourceId,
+     DateTime startAtUtc,
+     DateTime endAtUtc,
+     long? ignoreAppointmentId,
+     bool ignoreWorkingHours,
+     bool ignoreTimeOffBlocks,
+     bool ignoreAppointmentConflicts,
+     CancellationToken cancellationToken)
+    {
+        var serviceResult = await _appointmentSchedulingService.CheckAvailabilityAsync(
+            businessId,
+            serviceId,
+            staffMemberId,
+            resourceId,
+            startAtUtc,
+            endAtUtc,
+            ignoreAppointmentId,
+            ignoreWorkingHours,
+            ignoreTimeOffBlocks,
+            ignoreAppointmentConflicts,
+            cancellationToken);
+
+        return new OwnerCreateAvailabilityResult
+        {
+            IsAvailable = serviceResult.IsAvailable,
+            WasAvailableByRules = serviceResult.IsAvailable,
+            HasBusinessHoursViolation = serviceResult.HasBusinessHoursViolation,
+            HasStaffHoursViolation = serviceResult.HasStaffHoursViolation,
+            HasTimeOffConflict = serviceResult.HasTimeOffConflict,
+            HasAppointmentConflict = serviceResult.HasAppointmentConflict,
+            HasResourceConflict = serviceResult.HasResourceConflict,
+            Message = serviceResult.Message,
+            ReasonCode = serviceResult.ReasonCode,
+            ReasonCodes = serviceResult.IsAvailable
+                ? new List<string>()
+                : new List<string> { serviceResult.ReasonCode }
+        };
+    }
+
+    private sealed class OwnerCreateAvailabilityResult
+    {
+        public bool IsAvailable { get; set; }
+        public bool WasAvailableByRules { get; set; }
+        public bool HasSlotGridViolation { get; set; }
+        public bool HasBusinessHoursViolation { get; set; }
+        public bool HasStaffHoursViolation { get; set; }
+        public bool HasTimeOffConflict { get; set; }
+        public bool HasAppointmentConflict { get; set; }
+        public bool HasResourceConflict { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string ReasonCode { get; set; } = string.Empty;
+        public List<string> ReasonCodes { get; set; } = new();
+    }
+
+
+    private static DateTime GetConfirmedRescheduleRequestExpirationUtc(DateTime nowUtc)
+    {
+        return nowUtc.AddHours(12);
+    }
+
     private static DateTime GetNewBookingRequestExpirationUtc(DateTime nowUtc)
     {
         return nowUtc.AddHours(24);
     }
 
-    private static DateTime GetCounterProposalExpirationUtc(DateTime nowUtc)
+    private static string GetChangeRequestReasonCode(
+        AppointmentChangeRequest changeRequest,
+        string baseCode)
     {
-        return nowUtc.AddHours(12);
-    }
-
-    private static DateTime GetDelayProposalExpirationUtc(DateTime nowUtc)
-    {
-        return nowUtc.AddMinutes(15);
-    }
-    private async Task<OwnerCreateAvailabilityResult> IsSpecificTimeAvailableAsync(
-      long businessId,
-      long staffMemberId,
-      DateTime startAtUtc,
-      DateTime endAtUtc,
-      long? ignoreAppointmentId,
-      bool ignoreWorkingHours,
-      bool ignoreTimeOffBlocks,
-      bool ignoreAppointmentConflicts,
-      CancellationToken cancellationToken)
-    {
-        var result = new OwnerCreateAvailabilityResult
+        return changeRequest.Status switch
         {
-            WasAvailableByRules = true,
-            IsAvailable = true,
-            Message = "Izabrani termin je dostupan.",
-            ReasonCode = "available"
-        };
-
-        var targetDate = startAtUtc.Date;
-
-        if (endAtUtc.Date != targetDate)
-        {
-            result.IsAvailable = false;
-            result.WasAvailableByRules = false;
-            result.Message = "Termin mora biti u okviru istog dana.";
-            result.ReasonCode = "cross_day_not_supported";
-            return result;
-        }
-
-        var dayOfWeek = targetDate.DayOfWeek switch
-        {
-            DayOfWeek.Monday => 1,
-            DayOfWeek.Tuesday => 2,
-            DayOfWeek.Wednesday => 3,
-            DayOfWeek.Thursday => 4,
-            DayOfWeek.Friday => 5,
-            DayOfWeek.Saturday => 6,
-            _ => 7
-        };
-
-        if (!ignoreWorkingHours)
-        {
-            var businessHours = await _dbContext.BusinessWorkingHours
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    x => x.BusinessId == businessId && x.DayOfWeek == dayOfWeek,
-                    cancellationToken);
-
-            if (businessHours is null || businessHours.IsClosed)
-            {
-                result.HasBusinessHoursViolation = true;
-            }
-
-            var staffHours = await _dbContext.StaffWorkingHours
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    x => x.StaffMemberId == staffMemberId && x.DayOfWeek == dayOfWeek,
-                    cancellationToken);
-
-            if (staffHours is null || staffHours.IsClosed)
-            {
-                result.HasStaffHoursViolation = true;
-            }
-
-            if (!result.HasBusinessHoursViolation && !result.HasStaffHoursViolation)
-            {
-                var effectiveStart = businessHours!.StartTime > staffHours!.StartTime
-                    ? businessHours.StartTime
-                    : staffHours.StartTime;
-
-                var effectiveEnd = businessHours.EndTime < staffHours.EndTime
-                    ? businessHours.EndTime
-                    : staffHours.EndTime;
-
-                if (effectiveEnd <= effectiveStart)
-                {
-                    result.HasBusinessHoursViolation = true;
-                    result.HasStaffHoursViolation = true;
-                }
-                else
-                {
-                    var allowedStartUtc = targetDate.Add(effectiveStart);
-                    var allowedEndUtc = targetDate.Add(effectiveEnd);
-
-                    if (startAtUtc < allowedStartUtc)
-                        result.HasBusinessHoursViolation = true;
-
-                    if (endAtUtc > allowedEndUtc)
-                        result.HasStaffHoursViolation = true;
-                }
-            }
-        }
-
-        if (!ignoreAppointmentConflicts)
-        {
-            result.HasAppointmentConflict = await _dbContext.Appointments
-                .AsNoTracking()
-                .AnyAsync(x =>
-                    x.BusinessId == businessId &&
-                    x.PrimaryStaffMemberId == staffMemberId &&
-                    x.Id != ignoreAppointmentId &&
-                    x.Status != AppointmentStatus.Cancelled &&
-                    x.Status != AppointmentStatus.Rejected &&
-                    startAtUtc < x.EndAtUtc &&
-                    endAtUtc > x.StartAtUtc,
-                    cancellationToken);
-        }
-
-        if (!ignoreTimeOffBlocks)
-        {
-            result.HasTimeOffConflict = await _dbContext.TimeOffBlocks
-                .AsNoTracking()
-                .AnyAsync(x =>
-                    x.BusinessId == businessId &&
-                    (x.StaffMemberId == null || x.StaffMemberId == staffMemberId) &&
-                    startAtUtc < x.EndAtUtc &&
-                    endAtUtc > x.StartAtUtc,
-                    cancellationToken);
-        }
-
-        result.WasAvailableByRules =
-            !result.HasBusinessHoursViolation &&
-            !result.HasStaffHoursViolation &&
-            !result.HasAppointmentConflict &&
-            !result.HasTimeOffConflict;
-
-        result.IsAvailable = result.WasAvailableByRules;
-
-        if (!result.IsAvailable)
-        {
-            result.Message = BuildOwnerCreateUnavailableMessage(result);
-            result.ReasonCode = GetOwnerCreateReasonCode(result);
-            result.ReasonCodes = GetOwnerCreateReasonCodes(result);
-        }
-
-        return result;
-    }
-    private static string BuildOwnerCreateAuditMessage(
-        bool wasAvailableByRules,
-        bool bypassedSlotGrid,
-        bool bypassedWorkingHours,
-        bool bypassedTimeOffBlocks,
-        bool bypassedAppointmentConflicts)
-    {
-        if (wasAvailableByRules)
-            return "Preduzetnik je ručno uneo i potvrdio termin.";
-
-        var parts = new List<string>();
-
-        if (bypassedSlotGrid)
-            parts.Add("rasporeda termina");
-
-        if (bypassedWorkingHours)
-            parts.Add("radnog vremena");
-
-        if (bypassedTimeOffBlocks)
-            parts.Add("označenog perioda nedostupnosti");
-
-        if (bypassedAppointmentConflicts)
-            parts.Add("konflikta sa drugim terminima");
-
-        if (parts.Count == 0)
-            return "Termin je ručno unet i potvrđen uz posebno odobrenje.";
-
-        return $"Termin je ručno unet i potvrđen uz odstupanje od: {string.Join(", ", parts)}.";
-    }
-    private static string BuildOwnerCreateResponseMessage(
-        bool wasAvailableByRules,
-        bool bypassedSlotGrid,
-        bool bypassedWorkingHours,
-        bool bypassedTimeOffBlocks,
-        bool bypassedAppointmentConflicts)
-    {
-        if (wasAvailableByRules)
-            return "Termin je uspešno sačuvan.";
-
-        var parts = new List<string>();
-
-        if (bypassedSlotGrid)
-            parts.Add("van rasporeda termina");
-
-        if (bypassedWorkingHours)
-            parts.Add("van radnog vremena");
-
-        if (bypassedTimeOffBlocks)
-            parts.Add("preko zauzetog perioda");
-
-        if (bypassedAppointmentConflicts)
-            parts.Add("preko drugog termina");
-
-        if (parts.Count == 0)
-            return "Termin je sačuvan.";
-
-        return $"Termin je sačuvan iako je bio {string.Join(", ", parts)}.";
-    }
-    private static string GetOwnerCreateCreationMode(
-        bool bypassedSlotGrid,
-        bool bypassedWorkingHours,
-        bool bypassedTimeOffBlocks,
-        bool bypassedAppointmentConflicts)
-    {
-        if (!bypassedSlotGrid && !bypassedWorkingHours && !bypassedTimeOffBlocks && !bypassedAppointmentConflicts)
-            return "normal";
-
-        return "manual_override";
-    }
-    private static string GetOwnerCreateCreationModeLabel(
-    string creationMode)
-    {
-        return creationMode switch
-        {
-            "normal" => "Termin je unet regularno",
-            "manual_override" => "Termin je unet uz ručno odobrenje",
-            _ => "Termin je unet"
+            AppointmentChangeRequestStatus.Expired => $"{baseCode}_expired",
+            AppointmentChangeRequestStatus.Accepted => $"{baseCode}_accepted",
+            AppointmentChangeRequestStatus.Rejected => $"{baseCode}_rejected",
+            AppointmentChangeRequestStatus.Cancelled => $"{baseCode}_cancelled",
+            AppointmentChangeRequestStatus.Pending => $"{baseCode}_not_pending",
+            _ => $"{baseCode}_inactive"
         };
     }
-    private static List<string> GetOwnerCreateAppliedOverrides(
-        bool bypassedSlotGrid,
-        bool bypassedWorkingHours,
-        bool bypassedTimeOffBlocks,
-        bool bypassedAppointmentConflicts)
-    {
-        var appliedOverrides = new List<string>();
 
-        if (bypassedSlotGrid)
-            appliedOverrides.Add("slot_grid");
-
-        if (bypassedWorkingHours)
-            appliedOverrides.Add("working_hours");
-
-        if (bypassedTimeOffBlocks)
-            appliedOverrides.Add("time_off_blocks");
-
-        if (bypassedAppointmentConflicts)
-            appliedOverrides.Add("appointment_conflicts");
-
-        return appliedOverrides;
-    }
-    private static List<string> GetOwnerCreateAppliedOverrideLabels(
-        bool bypassedSlotGrid,
-        bool bypassedWorkingHours,
-        bool bypassedTimeOffBlocks,
-        bool bypassedAppointmentConflicts)
-    {
-        var labels = new List<string>();
-
-        if (bypassedSlotGrid)
-            labels.Add("Raspored termina");
-
-        if (bypassedWorkingHours)
-            labels.Add("Radno vreme");
-
-        if (bypassedTimeOffBlocks)
-            labels.Add("Nedostupnost u tom periodu");
-
-        if (bypassedAppointmentConflicts)
-            labels.Add("Preklapanje sa drugim terminom");
-
-        return labels;
-    }
-
-    private async Task<OwnerCreateAvailabilityResult> IsOwnerCreateTimeAvailableAsync(
-     CreateOwnerAppointmentRequest request,
-     DateTime endAtUtc,
-     CancellationToken cancellationToken)
-    {
-        if (!request.PrimaryStaffMemberId.HasValue)
-        {
-            return new OwnerCreateAvailabilityResult
-            {
-                IsAvailable = false,
-                Message = "Potrebno je izabrati zaposlenog.",
-                ReasonCode = "staff_required",
-                ReasonCodes = new List<string> { "staff_required" }
-            };
-        }
-
-        var useLegacyMasterOverride = request.IgnoreAvailabilityRules;
-
-        var effectiveIgnoreWorkingHours =
-            useLegacyMasterOverride || request.IgnoreWorkingHours;
-
-        var effectiveIgnoreTimeOffBlocks =
-            useLegacyMasterOverride || request.IgnoreTimeOffBlocks;
-
-        var effectiveIgnoreAppointmentConflicts =
-            useLegacyMasterOverride || request.IgnoreAppointmentConflicts;
-
-        return await IsSpecificTimeAvailableAsync(
-            request.BusinessId,
-            request.PrimaryStaffMemberId.Value,
-            request.StartAtUtc,
-            endAtUtc,
-            null,
-            effectiveIgnoreWorkingHours,
-            effectiveIgnoreTimeOffBlocks,
-            effectiveIgnoreAppointmentConflicts,
-            cancellationToken);
-    }
-    private static string BuildOwnerCreateUnavailableMessage(OwnerCreateAvailabilityResult result)
-    {
-        var reasons = new List<string>();
-
-        if (result.HasSlotGridViolation)
-            reasons.Add("van rasporeda termina");
-
-        if (result.HasBusinessHoursViolation && result.HasStaffHoursViolation)
-            reasons.Add("izvan radnog vremena");
-
-        else
-        {
-            if (result.HasBusinessHoursViolation)
-                reasons.Add("izvan radnog vremena radnje");
-
-            if (result.HasStaffHoursViolation)
-                reasons.Add("izvan radnog vremena zaposlenog");
-        }
-
-        if (result.HasTimeOffConflict)
-            reasons.Add("u periodu kada nije moguće zakazivanje");
-
-        if (result.HasAppointmentConflict)
-            reasons.Add("u terminu koji je već zauzet");
-
-        if (reasons.Count == 0)
-            return "Izabrani termin trenutno nije dostupan.";
-
-        return $"Izabrani termin nije dostupan jer je {string.Join(", ", reasons)}.";
-    }
-
-    private static string GetOwnerCreateReasonCode(OwnerCreateAvailabilityResult result)
-    {
-        if (result.HasSlotGridViolation)
-            return "outside_slot_grid";
-
-        if (result.HasBusinessHoursViolation && result.HasStaffHoursViolation)
-            return "outside_business_and_staff_hours";
-
-        if (result.HasBusinessHoursViolation)
-            return "outside_business_hours";
-
-        if (result.HasStaffHoursViolation)
-            return "outside_staff_hours";
-
-        if (result.HasTimeOffConflict && result.HasAppointmentConflict)
-            return "timeoff_and_appointment_conflict";
-
-        if (result.HasTimeOffConflict)
-            return "timeoff_conflict";
-
-        if (result.HasAppointmentConflict)
-            return "appointment_conflict";
-
-        return "not_available";
-    }
-    private static List<string> GetOwnerCreateReasonCodes(OwnerCreateAvailabilityResult result)
-    {
-        var codes = new List<string>();
-
-        if (result.HasSlotGridViolation)
-            codes.Add("outside_slot_grid");
-
-        if (result.HasBusinessHoursViolation)
-            codes.Add("outside_business_hours");
-
-        if (result.HasStaffHoursViolation)
-            codes.Add("outside_staff_hours");
-
-        if (result.HasTimeOffConflict)
-            codes.Add("timeoff_conflict");
-
-        if (result.HasAppointmentConflict)
-            codes.Add("appointment_conflict");
-
-        if (codes.Count == 0 && !result.IsAvailable)
-            codes.Add("not_available");
-
-        return codes;
-    }
-
-    private async Task<bool> IsStartAlignedToBusinessSlotGridAsync(
-    long businessId,
-    long staffMemberId,
-    DateTime startAtUtc,
-    CancellationToken cancellationToken)
-    {
-        var business = await _dbContext.Businesses
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Id == businessId && x.IsActive,
-                cancellationToken);
-
-        if (business is null)
-            return false;
-
-        var targetDate = DateTime.SpecifyKind(startAtUtc.Date, DateTimeKind.Utc);
-
-        var dayOfWeek = targetDate.DayOfWeek switch
-        {
-            DayOfWeek.Monday => 1,
-            DayOfWeek.Tuesday => 2,
-            DayOfWeek.Wednesday => 3,
-            DayOfWeek.Thursday => 4,
-            DayOfWeek.Friday => 5,
-            DayOfWeek.Saturday => 6,
-            _ => 7
-        };
-
-        var businessHours = await _dbContext.BusinessWorkingHours
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.BusinessId == businessId && x.DayOfWeek == dayOfWeek,
-                cancellationToken);
-
-        if (businessHours is null || businessHours.IsClosed)
-            return false;
-
-        var staffHours = await _dbContext.StaffWorkingHours
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.StaffMemberId == staffMemberId && x.DayOfWeek == dayOfWeek,
-                cancellationToken);
-
-        if (staffHours is null || staffHours.IsClosed)
-            return false;
-
-        var effectiveStart = businessHours.StartTime > staffHours.StartTime
-            ? businessHours.StartTime
-            : staffHours.StartTime;
-
-        var effectiveEnd = businessHours.EndTime < staffHours.EndTime
-            ? businessHours.EndTime
-            : staffHours.EndTime;
-
-        if (effectiveEnd <= effectiveStart)
-            return false;
-
-        var dayStartUtc = targetDate.Add(effectiveStart);
-        var dayEndUtc = targetDate.Add(effectiveEnd);
-
-        if (startAtUtc < dayStartUtc || startAtUtc >= dayEndUtc)
-            return false;
-
-        var slotStepMinutes = business.SlotIntervalMin > 0
-            ? business.SlotIntervalMin
-            : 30;
-
-        var totalMinutesFromStart = (startAtUtc - dayStartUtc).TotalMinutes;
-
-        if (totalMinutesFromStart < 0)
-            return false;
-
-        return totalMinutesFromStart % slotStepMinutes == 0;
-    }
-    private async Task<int> GetTotalServiceDurationAsync(
-        long serviceId,
-        int fallbackDurationMin,
-        CancellationToken cancellationToken)
-    {
-        var stepDurations = await _dbContext.ServiceSteps
-            .AsNoTracking()
-            .Where(x => x.ServiceId == serviceId)
-            .Select(x => x.DurationMin)
-            .ToListAsync(cancellationToken);
-
-        if (stepDurations.Count == 0)
-            return fallbackDurationMin;
-
-        return stepDurations.Sum();
-    }
     private static string GetInactiveChangeRequestMessage(
         AppointmentChangeRequest changeRequest,
         string entityDisplayName)
@@ -2153,255 +1230,198 @@ CancellationToken cancellationToken)
             _ => $"{entityDisplayName} više nije aktivan."
         };
     }
-    private static string? GetOwnerActionLabel(string? actionType)
+    private static CreateAppointmentErrorResponse BuildCreateAppointmentErrorResponse(
+    string message,
+    string reasonCode,
+    bool hasSlotGridViolation = false,
+    bool hasBusinessHoursViolation = false,
+    bool hasStaffHoursViolation = false,
+    bool hasTimeOffConflict = false,
+    bool hasAppointmentConflict = false,
+    bool hasResourceConflict = false)
     {
-        return actionType switch
+        return new CreateAppointmentErrorResponse
         {
-            "CallCustomerMarked" => "Potrebno je pozvati klijenta",
-            "CustomerCallNoAnswer" => "Klijent se nije javio",
-            "ConfirmedByPhoneCall" => "Potvrđeno telefonom",
-            "RejectedByPhoneCall" => "Odbijeno telefonom",
-            "RescheduleNeededAfterCall" => "Potrebno je dogovoriti novi termin",
-            "CallAttemptScheduled" => "Zakazan novi pokušaj poziva",
-            _ => null
+            Message = message,
+            ReasonCode = reasonCode,
+            ReasonCodes = string.IsNullOrWhiteSpace(reasonCode)
+                ? new List<string>()
+                : new List<string> { reasonCode },
+            HasSlotGridViolation = hasSlotGridViolation,
+            HasBusinessHoursViolation = hasBusinessHoursViolation,
+            HasStaffHoursViolation = hasStaffHoursViolation,
+            HasTimeOffConflict = hasTimeOffConflict,
+            HasAppointmentConflict = hasAppointmentConflict,
+            HasResourceConflict = hasResourceConflict
         };
     }
 
-    private static bool RequiresOwnerFollowUp(
-    Appointment appointment,
-    AppointmentChangeRequest? pendingChange,
-    string? lastOwnerAction)
+    private static CreateAppointmentErrorResponse BuildCreateAppointmentErrorResponse(
+        OwnerCreateAvailabilityResult availability)
     {
-        if (appointment.Status == AppointmentStatus.PendingApproval)
-            return true;
-
-        if (pendingChange is not null)
-            return true;
-
-        return lastOwnerAction switch
+        return new CreateAppointmentErrorResponse
         {
-            "CallCustomerMarked" => true,
-            "CustomerCallNoAnswer" => true,
-            "RescheduleNeededAfterCall" => true,
-            "ConfirmedByPhoneCall" => false,
-            "RejectedByPhoneCall" => false,
-            "CallAttemptScheduled" => true,
-            _ => false
+            Message = availability.Message,
+            ReasonCode = availability.ReasonCode,
+            ReasonCodes = availability.ReasonCodes,
+            HasSlotGridViolation = availability.HasSlotGridViolation,
+            HasBusinessHoursViolation = availability.HasBusinessHoursViolation,
+            HasStaffHoursViolation = availability.HasStaffHoursViolation,
+            HasTimeOffConflict = availability.HasTimeOffConflict,
+            HasAppointmentConflict = availability.HasAppointmentConflict,
+            HasResourceConflict = availability.HasResourceConflict
         };
     }
-    private static string? GetFollowUpHint(
-    Appointment appointment,
-    AppointmentChangeRequest? pendingChange,
-    string? lastOwnerAction,
-    DateTime? scheduledCallAttemptAtUtc)
+
+    private static string MapCreateResourceSelectionReasonCode(string message)
     {
-        if (pendingChange is not null)
+        return message switch
         {
-            return pendingChange.RequestType switch
+            "Za izabranu uslugu je potrebno izabrati resurs." => "resource_required",
+            "Izabrani resurs ne postoji." => "resource_not_found",
+            "Izabrani resurs nije aktivan." => "resource_inactive",
+            "Izabrani resurs nije dozvoljen za izabranu uslugu." => "resource_not_allowed_for_service",
+            _ => "invalid_resource_selection"
+        };
+    }
+
+    private static string MapStaffServiceValidationReasonCode(string message)
+    {
+        return message switch
+        {
+            "Izabrani radnik ne postoji." => "staff_not_found",
+            "Izabrani radnik ne pripada ovoj radnji." => "staff_not_in_business",
+            "Izabrana usluga ne postoji." => "service_not_found",
+            "Izabrana usluga ne pripada ovoj radnji." => "service_not_in_business",
+            "Izabrani radnik ne radi ovu uslugu." => "staff_not_assigned_to_service",
+            _ => "invalid_staff_service_selection"
+        };
+    }
+
+    private async Task<OwnerCreateAvailabilityResult?> ValidateAcceptedDelayScheduleAsync(
+    Appointment appointment,
+    DateTime proposedStartAtUtc,
+    DateTime proposedEndAtUtc,
+    CancellationToken cancellationToken)
+    {
+        if (!appointment.PrimaryStaffMemberId.HasValue)
+        {
+            return new OwnerCreateAvailabilityResult
             {
-                AppointmentChangeRequestType.NewBookingRequest => "Potrebno je potvrditi termin",
-                AppointmentChangeRequestType.CounterProposal => "Čeka se odgovor na novi termin",
-                AppointmentChangeRequestType.DelayProposal => "Čeka se odgovor na pomeranje termina",
-                _ => "Potrebno je dalje postupanje"
+                IsAvailable = false,
+                Message = "Za termin je potrebno da bude izabran zaposleni.",
+                ReasonCode = "staff_required",
+                ReasonCodes = new List<string> { "staff_required" }
             };
         }
 
-        if (appointment.Status == AppointmentStatus.PendingApproval)
-            return "Potrebno je potvrditi termin";
+        var staffServiceValidationError = await StaffServiceValidationHelper.ValidateStaffCanPerformServiceAsync(
+            _dbContext,
+            appointment.BusinessId,
+            appointment.ServiceId,
+            appointment.PrimaryStaffMemberId,
+            cancellationToken);
 
-        return lastOwnerAction switch
+        if (staffServiceValidationError is not null)
         {
-            "CallCustomerMarked" => "Potrebno je pozvati klijenta",
-            "CustomerCallNoAnswer" => "Potrebno je pokušati ponovo",
-            "RescheduleNeededAfterCall" => "Potrebno je dogovoriti novi termin",
-            "CallAttemptScheduled" => scheduledCallAttemptAtUtc.HasValue
-                ? $"Potrebno je pozvati klijenta u {scheduledCallAttemptAtUtc.Value:HH:mm}"
-                : "Potrebno je pozvati klijenta u zakazano vreme",
-            "ConfirmedByPhoneCall" => "Nije potrebna dalja akcija",
-            "RejectedByPhoneCall" => "Nije potrebna dalja akcija",
-            _ => null
-        };
-    }
-    private static string? GetOwnerWorkflowState(
-    Appointment appointment,
-    AppointmentChangeRequest? pendingChange,
-    string? lastOwnerAction)
-    {
-        if (pendingChange is not null)
-        {
-            return pendingChange.RequestType switch
+            return new OwnerCreateAvailabilityResult
             {
-                AppointmentChangeRequestType.NewBookingRequest => "pending_business_approval",
-                AppointmentChangeRequestType.CounterProposal => "waiting_customer_for_counter_proposal",
-                AppointmentChangeRequestType.DelayProposal => "waiting_customer_for_delay_proposal",
-                AppointmentChangeRequestType.RescheduleRequest => "reschedule_requested",
-                _ => "pending_change_request"
+                IsAvailable = false,
+                Message = staffServiceValidationError,
+                ReasonCode = MapStaffServiceValidationReasonCode(staffServiceValidationError),
+                ReasonCodes = new List<string> { MapStaffServiceValidationReasonCode(staffServiceValidationError) }
             };
         }
 
-        if (appointment.Status == AppointmentStatus.PendingApproval)
-            return "pending_business_approval";
+        var availability = await CheckAvailabilityViaServiceAsync(
+            appointment.BusinessId,
+            appointment.ServiceId,
+            appointment.PrimaryStaffMemberId.Value,
+            appointment.ResourceId,
+            proposedStartAtUtc,
+            proposedEndAtUtc,
+            appointment.Id,
+            false,
+            false,
+            false,
+            cancellationToken);
 
-        return lastOwnerAction switch
-        {
-            "CallCustomerMarked" => "call_customer",
-            "CustomerCallNoAnswer" => "call_no_answer",
-            "RescheduleNeededAfterCall" => "reschedule_needed_after_call",
-            "ConfirmedByPhoneCall" => "confirmed_by_phone",
-            "RejectedByPhoneCall" => "rejected_by_phone",
-            _ => null
-        };
-    }
-    private static string? GetOwnerWorkflowLabel(string? ownerWorkflowState)
-    {
-        return ownerWorkflowState switch
-        {
-            "pending_business_approval" => "Potrebno je potvrditi termin",
-            "waiting_customer_for_counter_proposal" => "Čeka se odgovor klijenta na novi termin",
-            "waiting_customer_for_delay_proposal" => "Čeka se odgovor klijenta na pomeranje",
-            "reschedule_requested" => "Traži se promena termina",
-            "pending_change_request" => "Postoji aktivan zahtev za izmenu",
-            "call_customer" => "Potrebno je pozvati klijenta",
-            "call_no_answer" => "Klijent se nije javio",
-            "reschedule_needed_after_call" => "Potrebno je dogovoriti novi termin",
-            "confirmed_by_phone" => "Potvrđeno telefonom",
-            "rejected_by_phone" => "Odbijeno telefonom",
-            "call_attempt_scheduled" => "Zakazan je novi poziv",
-            _ => null
-        };
-    }
-    private static DateTime? TryExtractScheduledAtUtc(string? newValuesJson)
-    {
-        if (string.IsNullOrWhiteSpace(newValuesJson))
-            return null;
-
-        const string prefix = "ScheduledAtUtc=";
-        var startIndex = newValuesJson.IndexOf(prefix, StringComparison.Ordinal);
-
-        if (startIndex < 0)
-            return null;
-
-        startIndex += prefix.Length;
-
-        var endIndex = newValuesJson.IndexOf(';', startIndex);
-        var value = endIndex >= 0
-            ? newValuesJson[startIndex..endIndex]
-            : newValuesJson[startIndex..];
-
-        if (DateTime.TryParse(
-            value,
-            null,
-            System.Globalization.DateTimeStyles.RoundtripKind,
-            out var scheduledAtUtc))
-        {
-            return scheduledAtUtc;
-        }
+        if (!availability.IsAvailable)
+            return availability;
 
         return null;
     }
 
-    private static bool IsInactiveForOwnerCallAction(AppointmentStatus status)
+    private static string MapStaffResourceValidationReasonCode(string message)
     {
-        return status == AppointmentStatus.Rejected ||
-               status == AppointmentStatus.Cancelled ||
-               status == AppointmentStatus.Completed ||
-               status == AppointmentStatus.NoShow;
-    }
-
-    private static string BuildOwnerCallMessage(string defaultMessage, string? note)
-    {
-        return string.IsNullOrWhiteSpace(note)
-            ? defaultMessage
-            : $"{defaultMessage} Dodatna napomena: {note.Trim()}";
-    }
-
-    private async Task<Appointment?> GetActiveAppointmentForOwnerCallActionAsync(
-        long appointmentId,
-        string inactiveErrorMessage,
-        CancellationToken cancellationToken)
-    {
-        var appointment = await _dbContext.Appointments
-            .FirstOrDefaultAsync(x => x.Id == appointmentId, cancellationToken);
-
-        if (appointment is null)
-            return null;
-
-        if (IsInactiveForOwnerCallAction(appointment.Status))
-            throw new InvalidOperationException(inactiveErrorMessage);
-
-        return appointment;
-    }
-    private async Task<AppointmentChangeRequest?> GetLatestPendingChangeRequestAsync(
-    long appointmentId,
-    CancellationToken cancellationToken)
-    {
-        return await _dbContext.AppointmentChangeRequests
-            .Where(x =>
-                x.AppointmentId == appointmentId &&
-                x.Status == AppointmentChangeRequestStatus.Pending)
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
-    private sealed class OwnerCreateAvailabilityResult
-    {
-        public bool IsAvailable { get; set; }
-        public bool WasAvailableByRules { get; set; }
-        public bool HasSlotGridViolation { get; set; }
-        public bool HasBusinessHoursViolation { get; set; }
-        public bool HasStaffHoursViolation { get; set; }
-        public bool HasTimeOffConflict { get; set; }
-        public bool HasAppointmentConflict { get; set; }
-        public string Message { get; set; } = string.Empty;
-        public string ReasonCode { get; set; } = string.Empty;
-        public List<string> ReasonCodes { get; set; } = new();
-    }
-
-    private async Task ApprovePendingAppointmentAsync(
-        Appointment appointment,
-        CancellationToken cancellationToken)
-    {
-        var now = DateTime.UtcNow;
-
-        appointment.Status = AppointmentStatus.Confirmed;
-        appointment.UpdatedAtUtc = now;
-
-        var pendingRequest = await GetLatestPendingChangeRequestAsync(
-            appointment.Id,
-            cancellationToken);
-
-        if (pendingRequest is not null)
+        return message switch
         {
-            pendingRequest.Status = AppointmentChangeRequestStatus.Accepted;
-            pendingRequest.RespondedAtUtc = now;
-            pendingRequest.UpdatedAtUtc = now;
+            "Izabrani radnik ne postoji." => "staff_not_found",
+            "Izabrani radnik ne pripada ovoj radnji." => "staff_not_in_business",
+            "Izabrani resurs ne postoji." => "resource_not_found",
+            "Izabrani resurs ne pripada ovoj radnji." => "resource_not_in_business",
+            "Izabrani radnik ne radi sa ovim resursom." => "staff_not_assigned_to_resource",
+            _ => "invalid_staff_resource_selection"
+        };
+    }
+
+    private async Task<OwnerCreateAvailabilityResult?> ValidateAcceptedScheduleAsync(
+        Appointment appointment,
+        DateTime proposedStartAtUtc,
+        DateTime proposedEndAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (!appointment.PrimaryStaffMemberId.HasValue)
+        {
+            return new OwnerCreateAvailabilityResult
+            {
+                IsAvailable = false,
+                Message = "Za termin je potrebno da bude izabran zaposleni.",
+                ReasonCode = "staff_required",
+                ReasonCodes = new List<string> { "staff_required" }
+            };
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private async Task RejectPendingAppointmentAsync(
-        Appointment appointment,
-        string? reason,
-        CancellationToken cancellationToken)
-    {
-        var now = DateTime.UtcNow;
-
-        appointment.Status = AppointmentStatus.Rejected;
-        appointment.UpdatedAtUtc = now;
-
-        var pendingRequest = await GetLatestPendingChangeRequestAsync(
-            appointment.Id,
+        var staffServiceValidationError = await StaffServiceValidationHelper.ValidateStaffCanPerformServiceAsync(
+            _dbContext,
+            appointment.BusinessId,
+            appointment.ServiceId,
+            appointment.PrimaryStaffMemberId,
             cancellationToken);
 
-        if (pendingRequest is not null)
+        if (staffServiceValidationError is not null)
         {
-            pendingRequest.Status = AppointmentChangeRequestStatus.Rejected;
-            pendingRequest.Reason = reason?.Trim();
-            pendingRequest.RespondedAtUtc = now;
-            pendingRequest.UpdatedAtUtc = now;
+            return new OwnerCreateAvailabilityResult
+            {
+                IsAvailable = false,
+                Message = staffServiceValidationError,
+                ReasonCode = MapStaffServiceValidationReasonCode(staffServiceValidationError),
+                ReasonCodes = new List<string> { MapStaffServiceValidationReasonCode(staffServiceValidationError) }
+            };
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        var availability = await CheckAvailabilityViaServiceAsync(
+            appointment.BusinessId,
+            appointment.ServiceId,
+            appointment.PrimaryStaffMemberId.Value,
+            appointment.ResourceId,
+            proposedStartAtUtc,
+            proposedEndAtUtc,
+            appointment.Id,
+            false,
+            false,
+            false,
+            cancellationToken);
+
+        if (!availability.IsAvailable)
+            return availability;
+
+        return null;
     }
 
+    private long? TryGetCurrentUserId()
+    {
+        var raw = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return long.TryParse(raw, out var userId) ? userId : null;
+    }
 }

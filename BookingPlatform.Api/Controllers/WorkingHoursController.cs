@@ -1,20 +1,27 @@
-﻿using BookingPlatform.Contracts.Scheduling;
+﻿using System.Security.Claims;
+using BookingPlatform.Contracts.Scheduling;
+using BookingPlatform.Domain.Auth;
 using BookingPlatform.Domain.Scheduling;
 using BookingPlatform.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Contracts.Common;
 
 namespace BookingPlatform.Api.Controllers;
 
 [ApiController]
+[Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
 [Route("api/[controller]")]
-public sealed class WorkingHoursController : ControllerBase
+public sealed class WorkingHoursController : ApiControllerBase
 {
-    private readonly BookingDbContext _dbContext;
+    
 
-    public WorkingHoursController(BookingDbContext dbContext)
+    public WorkingHoursController(BookingDbContext dbContext) : base(dbContext)
     {
-        _dbContext = dbContext;
     }
 
     [HttpGet("business")]
@@ -22,7 +29,11 @@ public sealed class WorkingHoursController : ControllerBase
         [FromQuery] long businessId,
         CancellationToken cancellationToken)
     {
-        var items = await _dbContext.BusinessWorkingHours
+        var accessResult = await EnsureBusinessReadAccessAsync(businessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var items = await DbContext.BusinessWorkingHours
             .AsNoTracking()
             .Where(x => x.BusinessId == businessId)
             .OrderBy(x => x.DayOfWeek)
@@ -45,13 +56,17 @@ public sealed class WorkingHoursController : ControllerBase
         [FromBody] SetBusinessWorkingHourRequest request,
         CancellationToken cancellationToken)
     {
-        var businessExists = await _dbContext.Businesses
+        var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var businessExists = await DbContext.Businesses
             .AnyAsync(x => x.Id == request.BusinessId, cancellationToken);
 
         if (!businessExists)
             return BadRequest("Izabrana radnja ne postoji.");
 
-        if (request.DayOfWeek < 0 || request.DayOfWeek > 6)
+        if (request.DayOfWeek < 1 || request.DayOfWeek > 7)
             return BadRequest("Dan u nedelji nije ispravno zadat.");
 
         if (request.IsClosed)
@@ -65,10 +80,11 @@ public sealed class WorkingHoursController : ControllerBase
 
         if (!TimeSpan.TryParse(request.EndTime, out var endTime))
             return BadRequest("Vreme završetka nije ispravno.");
+
         if (!request.IsClosed && endTime <= startTime)
             return BadRequest("Vreme završetka mora biti posle vremena početka.");
 
-        var entity = await _dbContext.BusinessWorkingHours
+        var entity = await DbContext.BusinessWorkingHours
             .FirstOrDefaultAsync(
                 x => x.BusinessId == request.BusinessId && x.DayOfWeek == request.DayOfWeek,
                 cancellationToken);
@@ -81,14 +97,14 @@ public sealed class WorkingHoursController : ControllerBase
                 DayOfWeek = request.DayOfWeek
             };
 
-            _dbContext.BusinessWorkingHours.Add(entity);
+            DbContext.BusinessWorkingHours.Add(entity);
         }
 
         entity.StartTime = startTime;
         entity.EndTime = endTime;
         entity.IsClosed = request.IsClosed;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new BusinessWorkingHourDto
         {
@@ -103,14 +119,18 @@ public sealed class WorkingHoursController : ControllerBase
 
     [HttpDelete("business")]
     public async Task<ActionResult> DeleteBusinessHour(
-    [FromQuery] long businessId,
-    [FromQuery] int dayOfWeek,
-    CancellationToken cancellationToken)
+        [FromQuery] long businessId,
+        [FromQuery] int dayOfWeek,
+        CancellationToken cancellationToken)
     {
-        if (dayOfWeek < 0 || dayOfWeek > 6)
+        var accessResult = await EnsureBusinessWriteAccessAsync(businessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        if (dayOfWeek < 1 || dayOfWeek > 7)
             return BadRequest("Dan u nedelji nije ispravno zadat.");
 
-        var entity = await _dbContext.BusinessWorkingHours
+        var entity = await DbContext.BusinessWorkingHours
             .FirstOrDefaultAsync(
                 x => x.BusinessId == businessId && x.DayOfWeek == dayOfWeek,
                 cancellationToken);
@@ -118,8 +138,8 @@ public sealed class WorkingHoursController : ControllerBase
         if (entity is null)
             return NotFound("Radno vreme za taj dan ne postoji.");
 
-        _dbContext.BusinessWorkingHours.Remove(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        DbContext.BusinessWorkingHours.Remove(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
     }
@@ -129,7 +149,20 @@ public sealed class WorkingHoursController : ControllerBase
         [FromQuery] long staffMemberId,
         CancellationToken cancellationToken)
     {
-        var items = await _dbContext.StaffWorkingHours
+        var staff = await DbContext.StaffMembers
+            .AsNoTracking()
+            .Where(x => x.Id == staffMemberId)
+            .Select(x => new { x.Id, x.BusinessId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (staff is null)
+            return NotFound("Zaposleni ne postoji.");
+
+        var accessResult = await EnsureBusinessReadAccessAsync(staff.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var items = await DbContext.StaffWorkingHours
             .AsNoTracking()
             .Where(x => x.StaffMemberId == staffMemberId)
             .OrderBy(x => x.DayOfWeek)
@@ -152,13 +185,20 @@ public sealed class WorkingHoursController : ControllerBase
         [FromBody] SetStaffWorkingHourRequest request,
         CancellationToken cancellationToken)
     {
-        var staffExists = await _dbContext.StaffMembers
-            .AnyAsync(x => x.Id == request.StaffMemberId, cancellationToken);
+        var staff = await DbContext.StaffMembers
+            .AsNoTracking()
+            .Where(x => x.Id == request.StaffMemberId)
+            .Select(x => new { x.Id, x.BusinessId })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (!staffExists)
+        if (staff is null)
             return BadRequest("Izabrani zaposleni ne postoji.");
 
-        if (request.DayOfWeek < 0 || request.DayOfWeek > 6)
+        var accessResult = await EnsureBusinessWriteAccessAsync(staff.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        if (request.DayOfWeek < 1 || request.DayOfWeek > 7)
             return BadRequest("Dan u nedelji nije ispravno zadat.");
 
         if (request.IsClosed)
@@ -176,7 +216,7 @@ public sealed class WorkingHoursController : ControllerBase
         if (!request.IsClosed && endTime <= startTime)
             return BadRequest("Vreme završetka mora biti posle vremena početka.");
 
-        var entity = await _dbContext.StaffWorkingHours
+        var entity = await DbContext.StaffWorkingHours
             .FirstOrDefaultAsync(
                 x => x.StaffMemberId == request.StaffMemberId && x.DayOfWeek == request.DayOfWeek,
                 cancellationToken);
@@ -189,14 +229,14 @@ public sealed class WorkingHoursController : ControllerBase
                 DayOfWeek = request.DayOfWeek
             };
 
-            _dbContext.StaffWorkingHours.Add(entity);
+            DbContext.StaffWorkingHours.Add(entity);
         }
 
         entity.StartTime = startTime;
         entity.EndTime = endTime;
         entity.IsClosed = request.IsClosed;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new StaffWorkingHourDto
         {
@@ -211,14 +251,27 @@ public sealed class WorkingHoursController : ControllerBase
 
     [HttpDelete("staff")]
     public async Task<ActionResult> DeleteStaffHour(
-    [FromQuery] long staffMemberId,
-    [FromQuery] int dayOfWeek,
-    CancellationToken cancellationToken)
+        [FromQuery] long staffMemberId,
+        [FromQuery] int dayOfWeek,
+        CancellationToken cancellationToken)
     {
-        if (dayOfWeek < 0 || dayOfWeek > 6)
+        if (dayOfWeek < 1 || dayOfWeek > 7)
             return BadRequest("Dan u nedelji nije ispravno zadat.");
 
-        var entity = await _dbContext.StaffWorkingHours
+        var staff = await DbContext.StaffMembers
+            .AsNoTracking()
+            .Where(x => x.Id == staffMemberId)
+            .Select(x => new { x.Id, x.BusinessId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (staff is null)
+            return NotFound("Zaposleni ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(staff.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var entity = await DbContext.StaffWorkingHours
             .FirstOrDefaultAsync(
                 x => x.StaffMemberId == staffMemberId && x.DayOfWeek == dayOfWeek,
                 cancellationToken);
@@ -226,21 +279,25 @@ public sealed class WorkingHoursController : ControllerBase
         if (entity is null)
             return NotFound("Radno vreme za taj dan ne postoji.");
 
-        _dbContext.StaffWorkingHours.Remove(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        DbContext.StaffWorkingHours.Remove(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
     }
 
     [HttpGet("blocks")]
     public async Task<ActionResult<List<TimeOffBlockDto>>> GetBlocks(
-    [FromQuery] long businessId,
-    [FromQuery] long? staffMemberId,
-    [FromQuery] DateTime? fromUtc,
-    [FromQuery] DateTime? toUtc,
-    CancellationToken cancellationToken)
+        [FromQuery] long businessId,
+        [FromQuery] long? staffMemberId,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        CancellationToken cancellationToken)
     {
-        var query = _dbContext.TimeOffBlocks
+        var accessResult = await EnsureBusinessReadAccessAsync(businessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var query = DbContext.TimeOffBlocks
             .AsNoTracking()
             .Where(x => x.BusinessId == businessId);
 
@@ -272,10 +329,10 @@ public sealed class WorkingHoursController : ControllerBase
 
     [HttpGet("blocks/{id:long}")]
     public async Task<ActionResult<TimeOffBlockDto>> GetBlockById(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var item = await _dbContext.TimeOffBlocks
+        var item = await DbContext.TimeOffBlocks
             .AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new TimeOffBlockDto
@@ -293,15 +350,23 @@ public sealed class WorkingHoursController : ControllerBase
         if (item is null)
             return NotFound("Blokirano vreme ne postoji.");
 
+        var accessResult = await EnsureBusinessReadAccessAsync(item.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
         return Ok(item);
     }
 
     [HttpPost("blocks")]
     public async Task<ActionResult<TimeOffBlockDto>> CreateBlock(
-    [FromBody] CreateTimeOffBlockRequest request,
-    CancellationToken cancellationToken)
+        [FromBody] CreateTimeOffBlockRequest request,
+        CancellationToken cancellationToken)
     {
-        var businessExists = await _dbContext.Businesses
+        var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var businessExists = await DbContext.Businesses
             .AnyAsync(x => x.Id == request.BusinessId, cancellationToken);
 
         if (!businessExists)
@@ -309,7 +374,7 @@ public sealed class WorkingHoursController : ControllerBase
 
         if (request.StaffMemberId.HasValue)
         {
-            var staffExists = await _dbContext.StaffMembers
+            var staffExists = await DbContext.StaffMembers
                 .AnyAsync(
                     x => x.Id == request.StaffMemberId.Value &&
                          x.BusinessId == request.BusinessId,
@@ -334,8 +399,8 @@ public sealed class WorkingHoursController : ControllerBase
             UpdatedAtUtc = DateTime.UtcNow
         };
 
-        _dbContext.TimeOffBlocks.Add(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        DbContext.TimeOffBlocks.Add(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new TimeOffBlockDto
         {
@@ -351,17 +416,21 @@ public sealed class WorkingHoursController : ControllerBase
 
     [HttpPut("blocks/{id:long}")]
     public async Task<ActionResult<TimeOffBlockDto>> UpdateBlock(
-    [FromRoute] long id,
-    [FromBody] CreateTimeOffBlockRequest request,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        [FromBody] CreateTimeOffBlockRequest request,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.TimeOffBlocks
+        var entity = await DbContext.TimeOffBlocks
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Blokirano vreme ne postoji.");
 
-        var businessExists = await _dbContext.Businesses
+        var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var businessExists = await DbContext.Businesses
             .AnyAsync(x => x.Id == request.BusinessId, cancellationToken);
 
         if (!businessExists)
@@ -369,7 +438,7 @@ public sealed class WorkingHoursController : ControllerBase
 
         if (request.StaffMemberId.HasValue)
         {
-            var staffExists = await _dbContext.StaffMembers
+            var staffExists = await DbContext.StaffMembers
                 .AnyAsync(
                     x => x.Id == request.StaffMemberId.Value &&
                          x.BusinessId == request.BusinessId,
@@ -390,7 +459,7 @@ public sealed class WorkingHoursController : ControllerBase
         entity.Reason = request.Reason?.Trim();
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new TimeOffBlockDto
         {
@@ -406,17 +475,21 @@ public sealed class WorkingHoursController : ControllerBase
 
     [HttpDelete("blocks/{id:long}")]
     public async Task<ActionResult> DeleteBlock(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.TimeOffBlocks
+        var entity = await DbContext.TimeOffBlocks
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Blokirano vreme ne postoji.");
 
-        _dbContext.TimeOffBlocks.Remove(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        var accessResult = await EnsureBusinessWriteAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        DbContext.TimeOffBlocks.Remove(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
     }

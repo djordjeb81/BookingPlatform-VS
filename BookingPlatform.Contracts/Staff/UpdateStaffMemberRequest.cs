@@ -6,4 +6,5 @@ public sealed class UpdateStaffMemberRequest
     public string? Title { get; set; }
     public bool IsBookable { get; set; }
     public bool IsActive { get; set; }
+    public int ScheduleMode { get; set; }
 }

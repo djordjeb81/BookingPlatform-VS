@@ -1,0 +1,350 @@
+﻿<Window x:Class="SmartBooking_Desk.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SmartBooking_Desk"
+        mc:Ignorable="d"
+        Title="SmartBooking - Upravljanje terminima"
+        Height="900"
+        Width="1600"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="12"
+                Background="#F5F5F5"
+                BorderBrush="#DADADA"
+                BorderThickness="1"
+                CornerRadius="6">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Text="Upravljanje terminima"
+                               FontSize="22"
+                               FontWeight="SemiBold"/>
+                    <TextBlock x:Name="HeaderStatusTextBlock"
+                               Margin="0,4,0,0"
+                               Text="Prijavite se i proverite licencu da biste nastavili."
+                               Foreground="#555555"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal"
+            HorizontalAlignment="Right"
+            DockPanel.Dock="Right">
+                    <Button x:Name="OpenSettingsButton"
+            Content="Podešavanja"
+            Width="130"
+            Height="34"
+            Margin="0,0,10,0"
+            Click="OpenSettingsButton_Click"/>
+
+                    <Button x:Name="OpenCreateAppointmentButton"
+            Content="Novi termin"
+            Width="130"
+            Height="34"
+            Margin="0,0,10,0"
+            Click="OpenCreateAppointmentButton_Click"/>
+
+                    <Button x:Name="OpenCustomersButton"
+        Content="Klijenti"
+        Width="110"
+        Height="34"
+        Margin="0,0,10,0"
+        Click="OpenCustomersButton_Click"/>
+
+                    <TextBlock VerticalAlignment="Center"
+               Margin="0,0,8,0"
+               Text="Izabrani datum:"/>
+                    <DatePicker x:Name="SelectedDatePicker"
+                Width="150"
+                Margin="0,0,10,0"
+                SelectedDateChanged="SelectedDatePicker_SelectedDateChanged"/>
+                    <Button x:Name="LoadAppointmentsButton"
+            Content="Osveži termine"
+            Width="140"
+            Height="34"
+            Margin="0,0,8,0"
+            Click="LoadAppointmentsButton_Click"/>
+                    <Button x:Name="LoadInboxButton"
+            Content="Osveži obaveštenja"
+            Width="160"
+            Height="34"
+            Click="LoadInboxButton_Click"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Padding="10"
+                    Background="#FAFAFA"
+                    BorderBrush="#DDDDDD"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="Izabrani datum" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TodayTextBlock"
+                               Margin="0,6,0,0"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="-"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Padding="10"
+                    Background="#FAFAFA"
+                    BorderBrush="#DDDDDD"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="Sledeći termin" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="NextAppointmentTextBlock"
+                               Margin="0,6,0,0"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="-"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="4"
+                    Padding="10"
+                    Background="#FAFAFA"
+                    BorderBrush="#DDDDDD"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="Broj termina za dan" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TodayCountTextBlock"
+                               Margin="0,6,0,0"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="6"
+                    Padding="10"
+                    Background="#FAFAFA"
+                    BorderBrush="#DDDDDD"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="Stavke za reakciju" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="FollowUpCountTextBlock"
+                               Margin="0,6,0,0"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="0"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3.2*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2.4*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2.6*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2.2*"/>
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Grid.Column="0" Header="Raspored za izabrani dan" Padding="8">
+                <Grid>
+                    <DataGrid x:Name="AppointmentsGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              SelectionMode="Single"
+                              SelectionChanged="AppointmentsGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Vreme" Width="120" Binding="{Binding TimeSlot}" />
+                            <DataGridTextColumn Header="Status" Width="130" Binding="{Binding Status}" />
+                            <DataGridTextColumn Header="Klijent" Width="170" Binding="{Binding CustomerName}" />
+                            <DataGridTextColumn Header="Usluga" Width="180" Binding="{Binding ServiceName}" />
+                            <DataGridTextColumn Header="Telefon" Width="140" Binding="{Binding CustomerPhone}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox Grid.Column="2" Header="Obaveštenja za izabrani dan" Padding="8">
+                <Grid>
+                    <DataGrid x:Name="InboxGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              SelectionMode="Single"
+                              SelectionChanged="InboxGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Vreme" Width="120" Binding="{Binding TimeSlot}" />
+                            <DataGridTextColumn Header="Šta treba uraditi" Width="190" Binding="{Binding OwnerWorkflowLabel}" />
+                            <DataGridTextColumn Header="Klijent" Width="160" Binding="{Binding CustomerName}" />
+                            <DataGridTextColumn Header="Usluga" Width="160" Binding="{Binding ServiceName}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </GroupBox>
+
+            <Grid Grid.Column="4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="2*"/>
+                    <RowDefinition Height="12"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="12"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <GroupBox Grid.Row="0" Header="Detalji izabrane stavke" Padding="10">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Status:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="StatusValueTextBlock" Grid.Row="0" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Klijent:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="CustomerValueTextBlock" Grid.Row="2" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Telefon:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="PhoneValueTextBlock" Grid.Row="4" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Usluga:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="ServiceValueTextBlock" Grid.Row="6" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Radnik:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="StaffValueTextBlock" Grid.Row="8" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Resurs:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="ResourceValueTextBlock" Grid.Row="10" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Vreme:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="TimeValueTextBlock" Grid.Row="12" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Kreiran:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="CreatedAtValueTextBlock" Grid.Row="14" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Poslednja izmena:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="UpdatedAtValueTextBlock" Grid.Row="16" Grid.Column="1" Text="-" />
+
+                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Napomena:" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="NoteValueTextBlock"
+                       Grid.Row="18"
+                       Grid.Column="1"
+                       Text="-"
+                       TextWrapping="Wrap" />
+                        </Grid>
+                    </ScrollViewer>
+                </GroupBox>
+
+                <GroupBox Grid.Row="2" Header="Radnje" Padding="10">
+                    <WrapPanel>
+                        <Button x:Name="AcceptActionButton"
+                Content="Prihvati"
+                Width="110"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="AcceptActionButton_Click"/>
+
+                        <Button x:Name="RejectActionButton"
+                Content="Odbij"
+                Width="110"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="RejectActionButton_Click"/>
+
+                        <Button x:Name="ProposeNewTimeButton"
+                Content="Predloži novi termin"
+                Width="150"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="ProposeNewTimeButton_Click"/>
+
+                        <Button x:Name="ProposeDelayButton"
+                Content="Predloži odlaganje"
+                Width="150"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="ProposeDelayButton_Click"/>
+
+                        <Button x:Name="MarkCompletedButton"
+                Content="Označi kao završeno"
+                Width="150"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="MarkCompletedButton_Click"/>
+
+                        <Button x:Name="MarkNoShowButton"
+                Content="Klijent se nije pojavio"
+                Width="170"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="MarkNoShowButton_Click"/>
+
+                        <Button x:Name="CancelAppointmentButton"
+                Content="Otkaži termin"
+                Width="120"
+                Height="34"
+                Margin="0,0,8,8"
+                Click="CancelAppointmentButton_Click"/>
+                    </WrapPanel>
+                </GroupBox>
+
+                <GroupBox Grid.Row="4" Header="Dodatne informacije" Padding="10">
+                    <TextBlock x:Name="WorkflowInfoTextBlock"
+                               Text="Ovde će biti prikazane dodatne informacije za izabrani termin ili obaveštenje."
+                               TextWrapping="Wrap"/>
+                </GroupBox>
+            </Grid>
+
+            <GroupBox Grid.Column="6" Header="Pregled dana" Padding="8">
+                <ScrollViewer x:Name="DaysSidebarScrollViewer"
+                  VerticalScrollBarVisibility="Hidden"
+                  PreviewMouseWheel="DaysSidebarScrollViewer_PreviewMouseWheel">
+                    <StackPanel x:Name="DaysSidebarPanel"/>
+                </ScrollViewer>
+            </GroupBox>
+        </Grid>
+    </Grid>
+</Window>

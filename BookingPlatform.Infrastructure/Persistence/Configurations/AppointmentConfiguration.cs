@@ -1,4 +1,5 @@
 ﻿using BookingPlatform.Domain.Appointments;
+using BookingPlatform.Domain.Customers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -34,5 +35,19 @@ public sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appointm
 
         builder.Property(x => x.UpdatedAtUtc)
             .IsRequired();
+
+        builder.HasIndex(x => x.BusinessCustomerId);
+
+        builder.HasIndex(x => new
+        {
+            x.BusinessId,
+            x.BusinessCustomerId,
+            x.StartAtUtc
+        });
+
+        builder.HasOne<BusinessCustomer>()
+            .WithMany()
+            .HasForeignKey(x => x.BusinessCustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

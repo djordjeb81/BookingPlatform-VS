@@ -11,6 +11,7 @@ public sealed class OwnerCreateAvailabilityErrorResponse
     public bool HasStaffHoursViolation { get; set; }
     public bool HasTimeOffConflict { get; set; }
     public bool HasAppointmentConflict { get; set; }
+    public bool HasResourceConflict { get; set; }
 
     public bool BypassedSlotGrid { get; set; }
     public bool BypassedWorkingHours { get; set; }

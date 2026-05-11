@@ -25,6 +25,30 @@ public sealed class BusinessConfiguration : IEntityTypeConfiguration<Business>
         builder.Property(x => x.Email)
             .HasMaxLength(200);
 
+        builder.Property(x => x.Street)
+            .HasMaxLength(200);
+
+        builder.Property(x => x.StreetNumber)
+            .HasMaxLength(50);
+
+        builder.Property(x => x.City)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.PostalCode)
+            .HasMaxLength(30);
+
+        builder.Property(x => x.Country)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.GooglePlaceId)
+            .HasMaxLength(200);
+
+        builder.Property(x => x.Latitude)
+            .HasPrecision(9, 6);
+
+        builder.Property(x => x.Longitude)
+            .HasPrecision(9, 6);
+
         builder.Property(x => x.BusinessType)
             .IsRequired();
 
@@ -35,7 +59,7 @@ public sealed class BusinessConfiguration : IEntityTypeConfiguration<Business>
             .IsRequired();
 
         builder.Property(x => x.SlotIntervalMin)
-    .HasColumnName("slot_interval_min")
-    .IsRequired();
+            .HasColumnName("slot_interval_min")
+            .IsRequired();
     }
 }

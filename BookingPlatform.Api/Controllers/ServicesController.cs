@@ -1,20 +1,27 @@
-﻿using BookingPlatform.Contracts.Services;
+﻿using System.Security.Claims;
+using BookingPlatform.Contracts.Services;
+using BookingPlatform.Domain.Auth;
 using BookingPlatform.Domain.Services;
 using BookingPlatform.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Contracts.Common;
 
 namespace BookingPlatform.Api.Controllers;
 
 [ApiController]
+[Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
 [Route("api/[controller]")]
-public sealed class ServicesController : ControllerBase
+public sealed class ServicesController : ApiControllerBase
 {
-    private readonly BookingDbContext _dbContext;
+    
 
-    public ServicesController(BookingDbContext dbContext)
+    public ServicesController(BookingDbContext dbContext) : base(dbContext)
     {
-        _dbContext = dbContext;
     }
 
     [HttpGet]
@@ -22,10 +29,21 @@ public sealed class ServicesController : ControllerBase
         [FromQuery] long? businessId,
         CancellationToken cancellationToken)
     {
-        var query = _dbContext.Services.AsNoTracking();
+        IQueryable<Service> query = DbContext.Services.AsNoTracking();
 
         if (businessId.HasValue)
+        {
+            var accessResult = await EnsureBusinessReadAccessAsync(businessId.Value, cancellationToken);
+            if (accessResult is not null)
+                return accessResult;
+
             query = query.Where(x => x.BusinessId == businessId.Value);
+        }
+        else
+        {
+            var accessibleBusinessIds = await GetAccessibleBusinessIdsAsync(cancellationToken);
+            query = query.Where(x => accessibleBusinessIds.Contains(x.BusinessId));
+        }
 
         var items = await query
             .OrderBy(x => x.Name)
@@ -44,31 +62,34 @@ public sealed class ServicesController : ControllerBase
 
         return Ok(items);
     }
+
     [HttpGet("{id:long}")]
     public async Task<ActionResult<ServiceDto>> GetById(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var item = await _dbContext.Services
+        var entity = await DbContext.Services
             .AsNoTracking()
-            .Where(x => x.Id == id)
-            .Select(x => new ServiceDto
-            {
-                Id = x.Id,
-                BusinessId = x.BusinessId,
-                Name = x.Name,
-                Description = x.Description,
-                BasePrice = x.BasePrice,
-                EstimatedDurationMin = x.EstimatedDurationMin,
-                BookingStrategyType = (int)x.BookingStrategyType,
-                IsActive = x.IsActive
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-        if (item is null)
+        if (entity is null)
             return NotFound("Usluga ne postoji.");
 
-        return Ok(item);
+        var accessResult = await EnsureBusinessReadAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        return Ok(new ServiceDto
+        {
+            Id = entity.Id,
+            BusinessId = entity.BusinessId,
+            Name = entity.Name,
+            Description = entity.Description,
+            BasePrice = entity.BasePrice,
+            EstimatedDurationMin = entity.EstimatedDurationMin,
+            BookingStrategyType = (int)entity.BookingStrategyType,
+            IsActive = entity.IsActive
+        });
     }
 
     [HttpPost]
@@ -76,7 +97,17 @@ public sealed class ServicesController : ControllerBase
         [FromBody] CreateServiceRequest request,
         CancellationToken cancellationToken)
     {
-        var businessExists = await _dbContext.Businesses
+        var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Unesite naziv usluge.");
+
+        if (request.EstimatedDurationMin <= 0)
+            return BadRequest("Trajanje usluge mora biti veće od 0 minuta.");
+
+        var businessExists = await DbContext.Businesses
             .AnyAsync(x => x.Id == request.BusinessId, cancellationToken);
 
         if (!businessExists)
@@ -95,10 +126,10 @@ public sealed class ServicesController : ControllerBase
             UpdatedAtUtc = DateTime.UtcNow
         };
 
-        _dbContext.Services.Add(entity);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        DbContext.Services.Add(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
-        var dto = new ServiceDto
+        return Ok(new ServiceDto
         {
             Id = entity.Id,
             BusinessId = entity.BusinessId,
@@ -108,21 +139,24 @@ public sealed class ServicesController : ControllerBase
             EstimatedDurationMin = entity.EstimatedDurationMin,
             BookingStrategyType = (int)entity.BookingStrategyType,
             IsActive = entity.IsActive
-        };
-
-        return Ok(dto);
+        });
     }
+
     [HttpPut("{id:long}")]
     public async Task<ActionResult<ServiceDto>> Update(
-    [FromRoute] long id,
-    [FromBody] UpdateServiceRequest request,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        [FromBody] UpdateServiceRequest request,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.Services
+        var entity = await DbContext.Services
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
 
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("Unesite naziv usluge.");
@@ -138,7 +172,7 @@ public sealed class ServicesController : ControllerBase
         entity.IsActive = request.IsActive;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new ServiceDto
         {
@@ -152,16 +186,21 @@ public sealed class ServicesController : ControllerBase
             IsActive = entity.IsActive
         });
     }
+
     [HttpPost("{id:long}/deactivate")]
     public async Task<ActionResult<ServiceDto>> Deactivate(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.Services
+        var entity = await DbContext.Services
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
 
         if (!entity.IsActive)
             return BadRequest("Usluga je već neaktivna.");
@@ -169,7 +208,7 @@ public sealed class ServicesController : ControllerBase
         entity.IsActive = false;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new ServiceDto
         {
@@ -183,16 +222,21 @@ public sealed class ServicesController : ControllerBase
             IsActive = entity.IsActive
         });
     }
+
     [HttpPost("{id:long}/activate")]
     public async Task<ActionResult<ServiceDto>> Activate(
-    [FromRoute] long id,
-    CancellationToken cancellationToken)
+        [FromRoute] long id,
+        CancellationToken cancellationToken)
     {
-        var entity = await _dbContext.Services
+        var entity = await DbContext.Services
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
 
         if (entity.IsActive)
             return BadRequest("Usluga je već aktivna.");
@@ -200,7 +244,7 @@ public sealed class ServicesController : ControllerBase
         entity.IsActive = true;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new ServiceDto
         {
@@ -214,4 +258,38 @@ public sealed class ServicesController : ControllerBase
             IsActive = entity.IsActive
         });
     }
+
+    [HttpDelete("{id:long}")]
+    public async Task<ActionResult> Delete(
+    [FromRoute] long id,
+    CancellationToken cancellationToken)
+    {
+        var entity = await DbContext.Services
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (entity is null)
+            return NotFound("Usluga ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(entity.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var hasDependencies =
+            await DbContext.Appointments.AnyAsync(x => x.ServiceId == id, cancellationToken) ||
+            await DbContext.StaffServiceAssignments.AnyAsync(x => x.ServiceId == id, cancellationToken) ||
+            await DbContext.ServiceResourceRequirements.AnyAsync(x => x.ServiceId == id, cancellationToken) ||
+            await DbContext.ServiceResourceUsages.AnyAsync(x => x.ServiceId == id, cancellationToken) ||
+            await DbContext.ServiceSteps.AnyAsync(x => x.ServiceId == id, cancellationToken);
+
+        if (hasDependencies)
+        {
+            return BadRequest("Usluga ne može da se obriše jer je povezana sa drugim podacima. Prvo uklonite te veze ili je deaktivirajte.");
+        }
+
+        DbContext.Services.Remove(entity);
+        await DbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
 }

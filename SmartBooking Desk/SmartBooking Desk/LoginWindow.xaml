@@ -1,0 +1,168 @@
+﻿<Window x:Class="SmartBooking_Desk.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="SmartBooking - Prijava"
+        Height="760"
+        Width="620"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+	<Grid Margin="18">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="12"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="12"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+
+		<StackPanel Grid.Row="0">
+			<TextBlock Text="Dobro došli"
+                       FontSize="24"
+                       FontWeight="SemiBold"/>
+			<TextBlock Text="Prijavite se ili napravite nalog i biznis da biste nastavili."
+                       Margin="0,6,0,0"
+                       Foreground="#555555"/>
+		</StackPanel>
+
+		<TabControl Grid.Row="2">
+			<TabItem Header="Prijava">
+				<Grid Margin="12">
+					<Grid.RowDefinitions>
+						<RowDefinition Height="Auto"/>
+						<RowDefinition Height="6"/>
+						<RowDefinition Height="Auto"/>
+						<RowDefinition Height="14"/>
+						<RowDefinition Height="Auto"/>
+						<RowDefinition Height="6"/>
+						<RowDefinition Height="Auto"/>
+						<RowDefinition Height="18"/>
+						<RowDefinition Height="Auto"/>
+					</Grid.RowDefinitions>
+
+					<TextBlock Grid.Row="0" Text="Email"/>
+					<TextBox x:Name="LoginEmailTextBox"
+                             Grid.Row="2"
+                             Height="34"/>
+
+					<TextBlock Grid.Row="4" Text="Lozinka"/>
+					<PasswordBox x:Name="LoginPasswordBox"
+                                 Grid.Row="6"
+                                 Height="34"/>
+
+					<Button x:Name="LoginButton"
+                            Grid.Row="8"
+                            Content="Prijavi se"
+                            Height="38"
+                            Click="LoginButton_Click"/>
+				</Grid>
+			</TabItem>
+
+			<TabItem Header="Kreiranje naloga">
+				<ScrollViewer VerticalScrollBarVisibility="Auto">
+					<Grid Margin="12">
+						<Grid.ColumnDefinitions>
+							<ColumnDefinition Width="*"/>
+							<ColumnDefinition Width="12"/>
+							<ColumnDefinition Width="*"/>
+						</Grid.ColumnDefinitions>
+
+						<StackPanel Grid.Column="0">
+							<TextBlock Text="Ime i prezime"/>
+							<TextBox x:Name="RegisterFullNameTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Email za prijavu"/>
+							<TextBox x:Name="RegisterEmailTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Lozinka"/>
+							<PasswordBox x:Name="RegisterPasswordBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Naziv biznisa"/>
+							<TextBox x:Name="BusinessNameTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Tip biznisa"/>
+							<ComboBox x:Name="BusinessTypeComboBox" Height="34" Margin="0,6,0,12">
+								<ComboBoxItem Content="Salon" Tag="0" IsSelected="True"/>
+								<ComboBoxItem Content="Ordinacija" Tag="1"/>
+								<ComboBoxItem Content="Servis" Tag="2"/>
+								<ComboBoxItem Content="Restoran" Tag="3"/>
+								<ComboBoxItem Content="Drugo" Tag="99"/>
+							</ComboBox>
+
+							<TextBlock Text="Telefon biznisa"/>
+							<TextBox x:Name="BusinessPhoneTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Email biznisa"/>
+							<TextBox x:Name="BusinessEmailTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Opis"/>
+							<TextBox x:Name="BusinessDescriptionTextBox"
+                                     Height="80"
+                                     Margin="0,6,0,12"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"/>
+
+							<TextBlock Text="Interval termina (min)"/>
+							<TextBox x:Name="SlotIntervalTextBox"
+                                     Height="34"
+                                     Margin="0,6,0,12"
+                                     Text="30"/>
+						</StackPanel>
+
+						<StackPanel Grid.Column="2">
+							<TextBlock Text="Ulica"/>
+							<TextBox x:Name="StreetTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Broj"/>
+							<TextBox x:Name="StreetNumberTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Grad"/>
+							<TextBox x:Name="CityTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Poštanski broj"/>
+							<TextBox x:Name="PostalCodeTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Država"/>
+							<TextBox x:Name="CountryTextBox" Height="34" Margin="0,6,0,12" Text="Srbija"/>
+
+							<TextBlock Text="Latitude"/>
+							<TextBox x:Name="LatitudeTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Longitude"/>
+							<TextBox x:Name="LongitudeTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<TextBlock Text="Google Place ID"/>
+							<TextBox x:Name="GooglePlaceIdTextBox" Height="34" Margin="0,6,0,12"/>
+
+							<Border Margin="0,8,0,12"
+                                    Padding="10"
+                                    Background="#F7F7F7"
+                                    BorderBrush="#DDDDDD"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+								<TextBlock TextWrapping="Wrap"
+                                           Foreground="#555555">
+									TODO: Kasnije ovde dodati pretragu adrese i automatsko popunjavanje iz Google Maps / Places.
+									Za sada se adresa unosi ručno, a Latitude/Longitude i Google Place ID mogu ostati prazni.
+								</TextBlock>
+							</Border>
+
+							<Button x:Name="RegisterButton"
+                                    Content="Napravi nalog i biznis"
+                                    Height="40"
+                                    Click="RegisterButton_Click"/>
+						</StackPanel>
+					</Grid>
+				</ScrollViewer>
+			</TabItem>
+		</TabControl>
+
+		<TextBlock x:Name="StatusTextBlock"
+                   Grid.Row="4"
+                   Text=" "
+                   TextWrapping="Wrap"
+                   Foreground="#444444"/>
+	</Grid>
+</Window>

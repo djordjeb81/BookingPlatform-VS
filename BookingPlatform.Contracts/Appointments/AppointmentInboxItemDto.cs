@@ -14,6 +14,9 @@ public sealed class AppointmentInboxItemDto
     public long? StaffMemberId { get; set; }
     public string? StaffDisplayName { get; set; }
 
+    public long? ResourceId { get; set; }
+    public string? ResourceName { get; set; }
+
     public string AppointmentStatus { get; set; } = string.Empty;
     public string? ChangeRequestType { get; set; }
     public string? ChangeRequestStatus { get; set; }

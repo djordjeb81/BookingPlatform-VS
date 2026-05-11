@@ -1,0 +1,178 @@
+﻿<Window x:Class="SmartBooking_Desk.CreateAppointmentWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Novi termin"
+        Height="720"
+        Width="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FFF7F7F7">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="0,0,0,14"
+                BorderBrush="#22000000"
+                BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock Text="Novi termin"
+                           FontSize="24"
+                           FontWeight="SemiBold"/>
+                <TextBlock Text="Ručno unesite podatke za zakazivanje."
+                           Margin="0,6,0,0"
+                           Foreground="#666"/>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="0,16,0,16">
+            <StackPanel>
+                <TextBlock Text="Datum"
+                           FontWeight="SemiBold"/>
+                <DatePicker x:Name="DatePickerAppointmentDate"
+            Margin="0,6,0,14"
+            SelectedDateChanged="AppointmentInputs_Changed"/>
+
+                <ComboBox x:Name="ComboBoxService"
+          Margin="0,6,0,14"
+          Height="34"
+          DisplayMemberPath="Name"
+          SelectedValuePath="Id"
+          SelectionChanged="AppointmentInputs_Changed"/>
+
+                <ComboBox x:Name="ComboBoxStaff"
+          Margin="0,6,0,14"
+          Height="34"
+          DisplayMemberPath="DisplayName"
+          SelectedValuePath="Id"
+          SelectionChanged="AppointmentInputs_Changed"/>
+
+                <TextBlock Text="Slobodan termin"
+           FontWeight="SemiBold"/>
+                <ComboBox x:Name="ComboBoxAvailableSlots"
+          Margin="0,6,0,14"
+          Height="34"
+          DisplayMemberPath="DisplayLabel"
+          DropDownOpened="ComboBoxAvailableSlots_DropDownOpened"/>
+
+                <TextBlock Text="Pretraga postojećeg klijenta"
+           FontWeight="SemiBold"/>
+                <TextBox x:Name="TextBoxCustomerSearch"
+         Margin="0,6,0,4"
+         Height="34"
+         VerticalContentAlignment="Center"
+         TextChanged="TextBoxCustomerSearch_TextChanged"
+         ToolTip="Kucajte ime, telefon ili email za pretragu postojećih klijenata."/>
+
+                <Border x:Name="BorderCustomerSuggestions"
+        BorderBrush="#FFD7E3F4"
+        BorderThickness="1"
+        CornerRadius="6"
+        Margin="0,0,0,14"
+        MaxHeight="150"
+        Background="White"
+        Visibility="Collapsed">
+                    <ListBox x:Name="ListBoxCustomerSuggestions"
+             DisplayMemberPath="DisplayText"
+             SelectionChanged="ListBoxCustomerSuggestions_SelectionChanged"/>
+                </Border>
+
+                <TextBlock Text="Ime klijenta"
+           FontWeight="SemiBold"/>
+                <TextBox x:Name="TextBoxCustomerName"
+         Margin="0,6,0,14"
+         Height="34"
+         VerticalContentAlignment="Center"
+         TextChanged="CustomerManualFields_TextChanged"/>
+
+                <TextBlock Text="Telefon klijenta"
+                           FontWeight="SemiBold"/>
+                <TextBox x:Name="TextBoxCustomerPhone"
+         Margin="0,6,0,14"
+         Height="34"
+         VerticalContentAlignment="Center"
+         TextChanged="CustomerManualFields_TextChanged"/>
+
+                <TextBlock Text="Email klijenta (opciono)"
+           FontWeight="SemiBold"/>
+                <TextBox x:Name="TextBoxCustomerEmail"
+         Margin="0,6,0,8"
+         Height="34"
+         VerticalContentAlignment="Center"
+         TextChanged="CustomerManualFields_TextChanged"/>
+
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="TextBlockSelectedCustomerStatus"
+               Grid.Column="0"
+               Text=""
+               Foreground="#666"
+               VerticalAlignment="Center"
+               TextWrapping="Wrap"/>
+
+                    <Button x:Name="ButtonRememberCustomer"
+            Grid.Column="1"
+            Content="Zapamti klijenta"
+            Width="140"
+            Height="32"
+            Click="ButtonRememberCustomer_Click"/>
+                </Grid>
+
+                <TextBlock Text="Napomena"
+                           FontWeight="SemiBold"/>
+                <TextBox x:Name="TextBoxNotes"
+                         Margin="0,6,0,14"
+                         Height="110"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"/>
+
+                <Border Background="#FFF3F6FA"
+                        BorderBrush="#FFD7E3F4"
+                        BorderThickness="1"
+                        Padding="12"
+                        CornerRadius="8">
+                    <TextBlock x:Name="TextBlockStatus"
+                               Text="Popunite podatke i sačuvajte termin."
+                               Foreground="#335"
+                               TextWrapping="Wrap"/>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="ButtonCancel"
+                    Grid.Column="1"
+                    Content="Odustani"
+                    Width="110"
+                    Height="38"
+                    Margin="0,0,10,0"
+                    Click="ButtonCancel_Click"/>
+
+            <Button x:Name="ButtonSave"
+                    Grid.Column="2"
+                    Content="Sačuvaj termin"
+                    Width="150"
+                    Height="38"
+                    Click="ButtonSave_Click"/>
+        </Grid>
+    </Grid>
+</Window>
