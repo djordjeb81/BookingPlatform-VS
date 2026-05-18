@@ -8,6 +8,7 @@ public sealed class RegisterOwnerRequest
 
     public string BusinessName { get; set; } = string.Empty;
     public int BusinessType { get; set; }
+    public int BookingMode { get; set; } = 1;
     public string? Description { get; set; }
     public string? Phone { get; set; }
     public string? BusinessEmail { get; set; }

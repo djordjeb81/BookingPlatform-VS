@@ -7,6 +7,9 @@ public sealed class Business : AuditableEntity
 {
     public string Name { get; set; } = string.Empty;
     public BusinessType BusinessType { get; set; }
+
+    public BookingMode BookingMode { get; set; } = BookingMode.ServiceAppointment;
+
     public string? Description { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
@@ -28,4 +31,6 @@ public sealed class Business : AuditableEntity
 
     public ICollection<BusinessUserMembership> UserMemberships { get; set; } =
         new List<BusinessUserMembership>();
+
+    public BusinessFeatureSettings? FeatureSettings { get; set; }
 }

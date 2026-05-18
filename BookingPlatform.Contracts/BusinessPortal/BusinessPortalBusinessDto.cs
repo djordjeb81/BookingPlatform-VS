@@ -1,10 +1,18 @@
-﻿namespace BookingPlatform.Contracts.BusinessPortal;
+﻿using BookingPlatform.Contracts.Businesses;
+
+namespace BookingPlatform.Contracts.BusinessPortal;
 
 public sealed class BusinessPortalBusinessDto
 {
     public long BusinessId { get; set; }
 
     public string BusinessName { get; set; } = string.Empty;
+
+    public int BusinessType { get; set; }
+
+    public int BookingMode { get; set; }
+
+    public BusinessFeatureSettingsDto FeatureSettings { get; set; } = new();
 
     public string Role { get; set; } = string.Empty;
 

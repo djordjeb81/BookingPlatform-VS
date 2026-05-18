@@ -61,5 +61,15 @@ public sealed class BusinessConfiguration : IEntityTypeConfiguration<Business>
         builder.Property(x => x.SlotIntervalMin)
             .HasColumnName("slot_interval_min")
             .IsRequired();
+
+        builder.Property(x => x.BookingMode)
+    .HasConversion<int>()
+    .HasDefaultValue(BookingMode.ServiceAppointment)
+    .IsRequired();
+
+        builder.HasOne(x => x.FeatureSettings)
+            .WithOne(x => x.Business)
+            .HasForeignKey<BusinessFeatureSettings>(x => x.BusinessId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

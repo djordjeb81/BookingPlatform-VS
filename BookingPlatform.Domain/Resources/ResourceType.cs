@@ -8,5 +8,11 @@ public enum ResourceType
     Room = 4,
     DentalChair = 5,
     Table = 6,
-    ServiceBay = 7
+    ServiceBay = 7,
+
+    // Ugostiteljstvo / smeštaj
+    DiningTable = 8,
+    EventHall = 9,
+    AccommodationRoom = 10,
+    Apartment = 11
 }

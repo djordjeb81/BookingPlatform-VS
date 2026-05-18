@@ -1,11 +1,11 @@
 ﻿using BookingPlatform.Contracts.Businesses;
 using BookingPlatform.Contracts.Common;
+using BookingPlatform.Domain.Auth;
 using BookingPlatform.Domain.Businesses;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore; 
-using BookingPlatform.Domain.Auth;
+using Microsoft.EntityFrameworkCore;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -17,9 +17,7 @@ namespace BookingPlatform.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class BusinessesController : ApiControllerBase
 {
-    
-
-    public BusinessesController(BookingDbContext DbContext) : base(DbContext)
+    public BusinessesController(BookingDbContext dbContext) : base(dbContext)
     {
     }
 
@@ -32,34 +30,22 @@ public sealed class BusinessesController : ApiControllerBase
         if (!userId.HasValue)
             return BuildUnauthorized();
 
-        var items = await DbContext.BusinessUserMemberships
+        var accessibleBusinessIds = await DbContext.BusinessUserMemberships
             .AsNoTracking()
             .Where(x => x.AppUserId == userId.Value && x.IsActive)
-            .Join(
-                DbContext.Businesses.AsNoTracking(),
-                membership => membership.BusinessId,
-                business => business.Id,
-(membership, business) => new BusinessDto
-{
-    Id = business.Id,
-    Name = business.Name,
-    BusinessType = (int)business.BusinessType,
-    Description = business.Description,
-    Phone = business.Phone,
-    Email = business.Email,
-    Street = business.Street,
-    StreetNumber = business.StreetNumber,
-    City = business.City,
-    PostalCode = business.PostalCode,
-    Country = business.Country,
-    Latitude = business.Latitude,
-    Longitude = business.Longitude,
-    GooglePlaceId = business.GooglePlaceId,
-    SlotIntervalMin = business.SlotIntervalMin,
-    IsActive = business.IsActive
-})
+            .Select(x => x.BusinessId)
+            .ToListAsync(cancellationToken);
+
+        var businesses = await DbContext.Businesses
+            .AsNoTracking()
+            .Include(x => x.FeatureSettings)
+            .Where(x => accessibleBusinessIds.Contains(x.Id))
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
+
+        var items = businesses
+            .Select(ToDto)
+            .ToList();
 
         return Ok(items);
     }
@@ -68,48 +54,29 @@ public sealed class BusinessesController : ApiControllerBase
     [ProducesResponseType(typeof(BusinessDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BusinessDto>> GetById(
-            [FromRoute] long id,
+        [FromRoute] long id,
         CancellationToken cancellationToken)
     {
         var accessResult = await EnsureBusinessReadAccessAsync(id, cancellationToken);
         if (accessResult is not null)
             return accessResult;
 
-        var item = await DbContext.Businesses
+        var entity = await DbContext.Businesses
             .AsNoTracking()
-            .Where(x => x.Id == id)
-.Select(x => new BusinessDto
-{
-    Id = x.Id,
-    Name = x.Name,
-    BusinessType = (int)x.BusinessType,
-    Description = x.Description,
-    Phone = x.Phone,
-    Email = x.Email,
-    Street = x.Street,
-    StreetNumber = x.StreetNumber,
-    City = x.City,
-    PostalCode = x.PostalCode,
-    Country = x.Country,
-    Latitude = x.Latitude,
-    Longitude = x.Longitude,
-    GooglePlaceId = x.GooglePlaceId,
-    SlotIntervalMin = x.SlotIntervalMin,
-    IsActive = x.IsActive
-})
-            .FirstOrDefaultAsync(cancellationToken);
+            .Include(x => x.FeatureSettings)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-        if (item is null)
+        if (entity is null)
             return NotFound("Radnja ne postoji.");
 
-        return Ok(item);
+        return Ok(ToDto(entity));
     }
 
     [HttpPost]
     [ProducesResponseType(typeof(BusinessDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<BusinessDto>> Create(
-            [FromBody] CreateBusinessRequest request,
+        [FromBody] CreateBusinessRequest request,
         CancellationToken cancellationToken)
     {
         var userId = TryGetCurrentUserId();
@@ -123,14 +90,14 @@ public sealed class BusinessesController : ApiControllerBase
         if (!userExists)
             return BuildUnauthorized();
 
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest("Unesite naziv radnje.");
+        var validationResult = ValidateBusinessRequest(
+            request.Name,
+            request.BusinessType,
+            request.BookingMode,
+            request.SlotIntervalMin);
 
-        if (request.SlotIntervalMin <= 0)
-            return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
-
-        if (request.SlotIntervalMin > 180)
-            return BadRequest("Razmak između početaka termina je prevelik.");
+        if (validationResult is not null)
+            return validationResult;
 
         var now = DateTime.UtcNow;
 
@@ -138,6 +105,7 @@ public sealed class BusinessesController : ApiControllerBase
         {
             Name = request.Name.Trim(),
             BusinessType = (BusinessType)request.BusinessType,
+            BookingMode = (BookingMode)request.BookingMode,
             Description = request.Description?.Trim(),
             Phone = request.Phone?.Trim(),
             Email = request.Email?.Trim(),
@@ -152,7 +120,8 @@ public sealed class BusinessesController : ApiControllerBase
             SlotIntervalMin = request.SlotIntervalMin,
             IsActive = true,
             CreatedAtUtc = now,
-            UpdatedAtUtc = now
+            UpdatedAtUtc = now,
+            FeatureSettings = CreateFeatureSettings(request.FeatureSettings, (BookingMode)request.BookingMode)
         };
 
         DbContext.Businesses.Add(entity);
@@ -170,27 +139,7 @@ public sealed class BusinessesController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
-        var dto = new BusinessDto
-        {
-            Id = entity.Id,
-            Name = entity.Name,
-            BusinessType = (int)entity.BusinessType,
-            Description = entity.Description,
-            Phone = entity.Phone,
-            Email = entity.Email,
-            Street = entity.Street,
-            StreetNumber = entity.StreetNumber,
-            City = entity.City,
-            PostalCode = entity.PostalCode,
-            Country = entity.Country,
-            Latitude = entity.Latitude,
-            Longitude = entity.Longitude,
-            GooglePlaceId = entity.GooglePlaceId,
-            SlotIntervalMin = entity.SlotIntervalMin,
-            IsActive = entity.IsActive
-        };
-
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, dto);
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
     }
 
     [HttpPut("{id:long}")]
@@ -198,7 +147,7 @@ public sealed class BusinessesController : ApiControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BusinessDto>> Update(
-            [FromRoute] long id,
+        [FromRoute] long id,
         [FromBody] UpdateBusinessRequest request,
         CancellationToken cancellationToken)
     {
@@ -207,22 +156,24 @@ public sealed class BusinessesController : ApiControllerBase
             return accessResult;
 
         var entity = await DbContext.Businesses
+            .Include(x => x.FeatureSettings)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
             return NotFound("Radnja ne postoji.");
 
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest("Unesite naziv radnje.");
+        var validationResult = ValidateBusinessRequest(
+            request.Name,
+            request.BusinessType,
+            request.BookingMode,
+            request.SlotIntervalMin);
 
-        if (request.SlotIntervalMin <= 0)
-            return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
-
-        if (request.SlotIntervalMin > 180)
-            return BadRequest("Razmak između početaka termina je prevelik.");
+        if (validationResult is not null)
+            return validationResult;
 
         entity.Name = request.Name.Trim();
         entity.BusinessType = (BusinessType)request.BusinessType;
+        entity.BookingMode = (BookingMode)request.BookingMode;
         entity.Description = request.Description?.Trim();
         entity.Phone = request.Phone?.Trim();
         entity.Email = request.Email?.Trim();
@@ -238,27 +189,18 @@ public sealed class BusinessesController : ApiControllerBase
         entity.IsActive = request.IsActive;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
+        if (entity.FeatureSettings is null)
+        {
+            entity.FeatureSettings = CreateFeatureSettings(request.FeatureSettings, entity.BookingMode);
+        }
+        else
+        {
+            ApplyFeatureSettings(entity.FeatureSettings, request.FeatureSettings, entity.BookingMode);
+        }
+
         await DbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(new BusinessDto
-        {
-            Id = entity.Id,
-            Name = entity.Name,
-            BusinessType = (int)entity.BusinessType,
-            Description = entity.Description,
-            Phone = entity.Phone,
-            Email = entity.Email,
-            Street = entity.Street,
-            StreetNumber = entity.StreetNumber,
-            City = entity.City,
-            PostalCode = entity.PostalCode,
-            Country = entity.Country,
-            Latitude = entity.Latitude,
-            Longitude = entity.Longitude,
-            GooglePlaceId = entity.GooglePlaceId,
-            SlotIntervalMin = entity.SlotIntervalMin,
-            IsActive = entity.IsActive
-        });
+        return Ok(ToDto(entity));
     }
 
     [HttpPost("{id:long}/deactivate")]
@@ -266,7 +208,7 @@ public sealed class BusinessesController : ApiControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BusinessDto>> Deactivate(
-            [FromRoute] long id,
+        [FromRoute] long id,
         CancellationToken cancellationToken)
     {
         var accessResult = await EnsureBusinessOwnerAccessAsync(id, cancellationToken);
@@ -274,6 +216,7 @@ public sealed class BusinessesController : ApiControllerBase
             return accessResult;
 
         var entity = await DbContext.Businesses
+            .Include(x => x.FeatureSettings)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
@@ -287,25 +230,7 @@ public sealed class BusinessesController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(new BusinessDto
-        {
-            Id = entity.Id,
-            Name = entity.Name,
-            BusinessType = (int)entity.BusinessType,
-            Description = entity.Description,
-            Phone = entity.Phone,
-            Email = entity.Email,
-            Street = entity.Street,
-            StreetNumber = entity.StreetNumber,
-            City = entity.City,
-            PostalCode = entity.PostalCode,
-            Country = entity.Country,
-            Latitude = entity.Latitude,
-            Longitude = entity.Longitude,
-            GooglePlaceId = entity.GooglePlaceId,
-            SlotIntervalMin = entity.SlotIntervalMin,
-            IsActive = entity.IsActive
-        });
+        return Ok(ToDto(entity));
     }
 
     [HttpPost("{id:long}/activate")]
@@ -313,7 +238,7 @@ public sealed class BusinessesController : ApiControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BusinessDto>> Activate(
-            [FromRoute] long id,
+        [FromRoute] long id,
         CancellationToken cancellationToken)
     {
         var accessResult = await EnsureBusinessOwnerAccessAsync(id, cancellationToken);
@@ -321,6 +246,7 @@ public sealed class BusinessesController : ApiControllerBase
             return accessResult;
 
         var entity = await DbContext.Businesses
+            .Include(x => x.FeatureSettings)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (entity is null)
@@ -334,11 +260,71 @@ public sealed class BusinessesController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(new BusinessDto
+        return Ok(ToDto(entity));
+    }
+
+    private ActionResult? ValidateBusinessRequest(
+        string name,
+        int businessType,
+        int bookingMode,
+        int slotIntervalMin)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return BadRequest("Unesite naziv radnje.");
+
+        if (!Enum.IsDefined(typeof(BusinessType), businessType))
+            return BadRequest("Izabrana vrsta radnje nije ispravna.");
+
+        if (!Enum.IsDefined(typeof(BookingMode), bookingMode))
+            return BadRequest("Izabrani režim rada nije ispravan.");
+
+        if (slotIntervalMin <= 0)
+            return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
+
+        if (slotIntervalMin > 180)
+            return BadRequest("Razmak između početaka termina je prevelik.");
+
+        return null;
+    }
+
+    private static BusinessFeatureSettings CreateFeatureSettings(
+        BusinessFeatureSettingsDto? dto,
+        BookingMode bookingMode)
+    {
+        var settings = new BusinessFeatureSettings();
+
+        ApplyFeatureSettings(settings, dto, bookingMode);
+
+        return settings;
+    }
+
+    private static void ApplyFeatureSettings(
+        BusinessFeatureSettings settings,
+        BusinessFeatureSettingsDto? dto,
+        BookingMode bookingMode)
+    {
+        var effectiveDto = dto ?? CreateDefaultFeatureSettingsDto(bookingMode);
+
+        settings.ServiceAppointmentsEnabled = effectiveDto.ServiceAppointmentsEnabled;
+        settings.TableReservationsEnabled = effectiveDto.TableReservationsEnabled;
+        settings.FoodOrdersEnabled = effectiveDto.FoodOrdersEnabled;
+        settings.DrinkOrdersEnabled = effectiveDto.DrinkOrdersEnabled;
+        settings.TakeawayOrdersEnabled = effectiveDto.TakeawayOrdersEnabled;
+        settings.DeliveryOrdersEnabled = effectiveDto.DeliveryOrdersEnabled;
+        settings.EventHallReservationsEnabled = effectiveDto.EventHallReservationsEnabled;
+        settings.AccommodationEnabled = effectiveDto.AccommodationEnabled;
+        settings.ReviewsEnabled = effectiveDto.ReviewsEnabled;
+    }
+
+    private static BusinessDto ToDto(Business entity)
+    {
+        return new BusinessDto
         {
             Id = entity.Id,
             Name = entity.Name,
             BusinessType = (int)entity.BusinessType,
+            BookingMode = (int)entity.BookingMode,
+            FeatureSettings = ToFeatureSettingsDto(entity.FeatureSettings, entity.BookingMode),
             Description = entity.Description,
             Phone = entity.Phone,
             Email = entity.Email,
@@ -352,7 +338,72 @@ public sealed class BusinessesController : ApiControllerBase
             GooglePlaceId = entity.GooglePlaceId,
             SlotIntervalMin = entity.SlotIntervalMin,
             IsActive = entity.IsActive
-        });
+        };
     }
 
+    private static BusinessFeatureSettingsDto ToFeatureSettingsDto(
+        BusinessFeatureSettings? settings,
+        BookingMode bookingMode)
+    {
+        if (settings is null)
+            return CreateDefaultFeatureSettingsDto(bookingMode);
+
+        return new BusinessFeatureSettingsDto
+        {
+            ServiceAppointmentsEnabled = settings.ServiceAppointmentsEnabled,
+            TableReservationsEnabled = settings.TableReservationsEnabled,
+            FoodOrdersEnabled = settings.FoodOrdersEnabled,
+            DrinkOrdersEnabled = settings.DrinkOrdersEnabled,
+            TakeawayOrdersEnabled = settings.TakeawayOrdersEnabled,
+            DeliveryOrdersEnabled = settings.DeliveryOrdersEnabled,
+            EventHallReservationsEnabled = settings.EventHallReservationsEnabled,
+            AccommodationEnabled = settings.AccommodationEnabled,
+            ReviewsEnabled = settings.ReviewsEnabled
+        };
+    }
+
+    private static BusinessFeatureSettingsDto CreateDefaultFeatureSettingsDto(BookingMode bookingMode)
+    {
+        return bookingMode switch
+        {
+            BookingMode.Hospitality => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = true,
+                FoodOrdersEnabled = true,
+                DrinkOrdersEnabled = true,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            },
+
+            BookingMode.Accommodation => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = true,
+                ReviewsEnabled = true
+            },
+
+            _ => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = true,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            }
+        };
+    }
 }

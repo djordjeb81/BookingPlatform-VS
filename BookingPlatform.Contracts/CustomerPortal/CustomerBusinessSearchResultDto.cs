@@ -1,4 +1,6 @@
-﻿namespace BookingPlatform.Contracts.CustomerPortal;
+﻿using BookingPlatform.Contracts.Businesses;
+
+namespace BookingPlatform.Contracts.CustomerPortal;
 
 public sealed class CustomerBusinessSearchResultDto
 {
@@ -21,6 +23,10 @@ public sealed class CustomerBusinessSearchResultDto
     public string? Country { get; set; }
 
     public int BusinessType { get; set; }
+
+    public int BookingMode { get; set; }
+
+    public BusinessFeatureSettingsDto FeatureSettings { get; set; } = new();
 
     public double? Latitude { get; set; }
 

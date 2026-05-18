@@ -1,4 +1,6 @@
-﻿using BookingPlatform.Contracts.BusinessPortal;
+﻿using BookingPlatform.Contracts.Businesses;
+using BookingPlatform.Contracts.BusinessPortal;
+using BookingPlatform.Domain.Businesses;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -65,25 +67,48 @@ public sealed class BusinessPortalController : ControllerBase
         if (!userId.HasValue)
             return Unauthorized("Token nije validan.");
 
-        var items = await _dbContext.BusinessUserMemberships
+        var memberships = await _dbContext.BusinessUserMemberships
             .AsNoTracking()
             .Where(x => x.AppUserId == userId.Value && x.IsActive)
-            .Join(
-                _dbContext.Businesses.AsNoTracking(),
-                membership => membership.BusinessId,
-                business => business.Id,
-                (membership, business) => new BusinessPortalBusinessDto
-                {
-                    BusinessId = business.Id,
-                    BusinessName = business.Name,
-                    Role = membership.Role.ToString(),
-                    IsActive = business.IsActive,
-                    Phone = business.Phone,
-                    Email = business.Email,
-                    City = business.City
-                })
-            .OrderBy(x => x.BusinessName)
+            .Select(x => new
+            {
+                x.BusinessId,
+                Role = x.Role.ToString()
+            })
             .ToListAsync(cancellationToken);
+
+        if (memberships.Count == 0)
+            return Ok(new List<BusinessPortalBusinessDto>());
+
+        var roleByBusinessId = memberships
+            .ToDictionary(x => x.BusinessId, x => x.Role);
+
+        var businessIds = memberships
+            .Select(x => x.BusinessId)
+            .ToList();
+
+        var businesses = await _dbContext.Businesses
+            .AsNoTracking()
+            .Include(x => x.FeatureSettings)
+            .Where(x => businessIds.Contains(x.Id))
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var items = businesses
+            .Select(business => new BusinessPortalBusinessDto
+            {
+                BusinessId = business.Id,
+                BusinessName = business.Name,
+                BusinessType = (int)business.BusinessType,
+                BookingMode = (int)business.BookingMode,
+                FeatureSettings = ToFeatureSettingsDto(business.FeatureSettings, business.BookingMode),
+                Role = roleByBusinessId.TryGetValue(business.Id, out var role) ? role : string.Empty,
+                IsActive = business.IsActive,
+                Phone = business.Phone,
+                Email = business.Email,
+                City = business.City
+            })
+            .ToList();
 
         return Ok(items);
     }
@@ -223,6 +248,72 @@ public sealed class BusinessPortalController : ControllerBase
             return Forbid();
 
         return null;
+    }
+
+    private static BusinessFeatureSettingsDto ToFeatureSettingsDto(
+        BusinessFeatureSettings? settings,
+        BookingMode bookingMode)
+    {
+        if (settings is null)
+            return CreateDefaultFeatureSettingsDto(bookingMode);
+
+        return new BusinessFeatureSettingsDto
+        {
+            ServiceAppointmentsEnabled = settings.ServiceAppointmentsEnabled,
+            TableReservationsEnabled = settings.TableReservationsEnabled,
+            FoodOrdersEnabled = settings.FoodOrdersEnabled,
+            DrinkOrdersEnabled = settings.DrinkOrdersEnabled,
+            TakeawayOrdersEnabled = settings.TakeawayOrdersEnabled,
+            DeliveryOrdersEnabled = settings.DeliveryOrdersEnabled,
+            EventHallReservationsEnabled = settings.EventHallReservationsEnabled,
+            AccommodationEnabled = settings.AccommodationEnabled,
+            ReviewsEnabled = settings.ReviewsEnabled
+        };
+    }
+
+    private static BusinessFeatureSettingsDto CreateDefaultFeatureSettingsDto(BookingMode bookingMode)
+    {
+        return bookingMode switch
+        {
+            BookingMode.Hospitality => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = true,
+                FoodOrdersEnabled = true,
+                DrinkOrdersEnabled = true,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            },
+
+            BookingMode.Accommodation => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = true,
+                ReviewsEnabled = true
+            },
+
+            _ => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = true,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            }
+        };
     }
 
     private long? TryGetUserId()

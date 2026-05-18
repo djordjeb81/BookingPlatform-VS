@@ -1,0 +1,602 @@
+﻿using BookingPlatform.Contracts.Common;
+using BookingPlatform.Contracts.Restaurants;
+using BookingPlatform.Domain.Resources;
+using BookingPlatform.Domain.Restaurants;
+using BookingPlatform.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace BookingPlatform.Api.Controllers;
+
+[ApiController]
+[Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+[Route("api/[controller]")]
+public sealed class RestaurantFloorPlanController : ApiControllerBase
+{
+    private const int ReservationSoftWarningMinutes = 30;
+    private const int ReservationReleaseBeforeMinutes = 10;
+    private const int ReservationLookupDays = 7;
+    private const int MaxUpcomingReservationsPerTable = 5;
+
+    public RestaurantFloorPlanController(BookingDbContext dbContext) : base(dbContext)
+    {
+    }
+
+    [HttpGet("area/{restaurantAreaId:long}")]
+    public async Task<ActionResult<RestaurantFloorPlanDto>> GetAreaFloorPlan(
+        [FromRoute] long restaurantAreaId,
+        CancellationToken cancellationToken)
+    {
+        var statusAtUtc = DateTime.UtcNow;
+
+        var area = await DbContext.RestaurantAreas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == restaurantAreaId, cancellationToken);
+
+        if (area is null)
+            return NotFound("Sala ne postoji.");
+
+        var accessResult = await EnsureBusinessReadAccessAsync(area.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var elements = await DbContext.RestaurantLayoutElements
+            .AsNoTracking()
+            .Where(x => x.RestaurantAreaId == restaurantAreaId && x.IsActive)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.Id)
+            .Select(x => new RestaurantLayoutElementDto
+            {
+                Id = x.Id,
+                RestaurantAreaId = x.RestaurantAreaId,
+                ElementType = (int)x.ElementType,
+                Label = x.Label,
+                X = x.X,
+                Y = x.Y,
+                Width = x.Width,
+                Height = x.Height,
+                RotationDeg = x.RotationDeg,
+                ShapeType = (int)x.ShapeType,
+                PointsJson = x.PointsJson,
+                IsObstacle = x.IsObstacle,
+                DisplayOrder = x.DisplayOrder,
+                IsActive = x.IsActive
+            })
+            .ToListAsync(cancellationToken);
+
+        var resources = await DbContext.Resources
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var resourceIds = resources
+            .Select(x => x.Id)
+            .ToList();
+
+        var activeSessions = await DbContext.RestaurantTableSessions
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                resourceIds.Contains(x.TableResourceId) &&
+                x.Status == RestaurantTableSessionStatus.Active &&
+                x.ReleasedAtUtc == null)
+            .OrderByDescending(x => x.StartedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var activeSessionByTableId = activeSessions
+            .GroupBy(x => x.TableResourceId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.StartedAtUtc).First());
+
+        var reservationLookupToUtc = statusAtUtc.AddDays(ReservationLookupDays);
+
+        var upcomingAreaReservations = await DbContext.RestaurantAreaReservations
+    .AsNoTracking()
+    .Where(x =>
+        x.BusinessId == area.BusinessId &&
+        x.RestaurantAreaId == restaurantAreaId &&
+        x.Status == RestaurantAreaReservationStatus.Confirmed &&
+        x.ReservationAtUtc <= reservationLookupToUtc)
+    .OrderBy(x => x.ReservationAtUtc)
+    .Take(20)
+    .ToListAsync(cancellationToken);
+
+        var currentAreaReservation = upcomingAreaReservations
+            .FirstOrDefault(x =>
+            {
+                var startUtc = x.ReservationAtUtc;
+                var durationMin = x.ExpectedDurationMin.GetValueOrDefault(240);
+
+                if (durationMin <= 0)
+                    durationMin = 240;
+
+                var endUtc = startUtc.AddMinutes(durationMin);
+
+                return startUtc <= statusAtUtc && statusAtUtc < endUtc;
+            });
+
+        var nextAreaReservation = upcomingAreaReservations
+            .Where(x => x.ReservationAtUtc >= statusAtUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .FirstOrDefault();
+
+        var upcomingReservations = await DbContext.RestaurantTableReservations
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.TableResourceId.HasValue &&
+                resourceIds.Contains(x.TableResourceId.Value) &&
+                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                x.ReservationAtUtc >= statusAtUtc &&
+                x.ReservationAtUtc <= reservationLookupToUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var unassignedUpcomingReservations = await DbContext.RestaurantTableReservations
+    .AsNoTracking()
+    .Where(x =>
+        x.BusinessId == area.BusinessId &&
+        x.RestaurantAreaId == restaurantAreaId &&
+        !x.TableResourceId.HasValue &&
+        x.Status == RestaurantTableReservationStatus.Confirmed &&
+        x.ReservationAtUtc >= statusAtUtc &&
+        x.ReservationAtUtc <= reservationLookupToUtc)
+    .OrderBy(x => x.ReservationAtUtc)
+    .Take(50)
+    .ToListAsync(cancellationToken);
+
+        var nextReservationByTableId = upcomingReservations
+            .GroupBy(x => x.TableResourceId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(x => x.ReservationAtUtc).First());
+
+        var upcomingReservationsByTableId = upcomingReservations
+    .GroupBy(x => x.TableResourceId!.Value)
+    .ToDictionary(
+        g => g.Key,
+        g => g
+            .OrderBy(x => x.ReservationAtUtc)
+            .Take(MaxUpcomingReservationsPerTable)
+            .ToList());
+
+        var activeSessionIds = activeSessions
+            .Select(x => x.Id)
+            .ToList();
+
+        var allOrders = activeSessionIds.Count == 0
+            ? new List<RestaurantOrder>()
+            : await DbContext.RestaurantOrders
+                .AsNoTracking()
+                .Where(x =>
+                    x.TableSessionId.HasValue &&
+                    activeSessionIds.Contains(x.TableSessionId.Value) &&
+                    x.Status != RestaurantOrderStatus.Cancelled)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .ToListAsync(cancellationToken);
+
+        var activeOrders = allOrders
+            .Where(x => x.Status != RestaurantOrderStatus.Served)
+            .ToList();
+
+        var allOrdersBySessionId = allOrders
+            .Where(x => x.TableSessionId.HasValue)
+            .GroupBy(x => x.TableSessionId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.ToList());
+
+        var activeOrdersBySessionId = activeOrders
+            .Where(x => x.TableSessionId.HasValue)
+            .GroupBy(x => x.TableSessionId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.ToList());
+
+        var payments = activeSessionIds.Count == 0
+            ? new List<RestaurantPayment>()
+            : await DbContext.RestaurantPayments
+                .AsNoTracking()
+                .Where(x =>
+                    activeSessionIds.Contains(x.TableSessionId) &&
+                    x.Status == RestaurantPaymentStatus.Paid)
+                .ToListAsync(cancellationToken);
+
+        var paidAmountBySessionId = payments
+            .GroupBy(x => x.TableSessionId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Sum(x => x.Amount));
+
+        var areaStatus = GetAreaStatus(area.IsActive, currentAreaReservation, nextAreaReservation, statusAtUtc);
+
+        var resourceDtos = resources
+            .Select(resource =>
+            {
+                activeSessionByTableId.TryGetValue(resource.Id, out var activeSession);
+                nextReservationByTableId.TryGetValue(resource.Id, out var nextReservation);
+                upcomingReservationsByTableId.TryGetValue(resource.Id, out var resourceUpcomingReservations);
+
+                resourceUpcomingReservations ??= new List<RestaurantTableReservation>();
+
+                var activeOrdersForSession = new List<RestaurantOrder>();
+                var allOrdersForSession = new List<RestaurantOrder>();
+                var paidAmount = 0m;
+
+                if (activeSession is not null)
+                {
+                    activeOrdersBySessionId.TryGetValue(activeSession.Id, out activeOrdersForSession);
+                    allOrdersBySessionId.TryGetValue(activeSession.Id, out allOrdersForSession);
+                    paidAmountBySessionId.TryGetValue(activeSession.Id, out paidAmount);
+                }
+
+                return ToResourceDto(
+                    resource,
+                    activeSession,
+                    nextReservation,
+                    resourceUpcomingReservations,
+                    statusAtUtc,
+                    activeOrdersForSession ?? new List<RestaurantOrder>(),
+                    allOrdersForSession ?? new List<RestaurantOrder>(),
+                    paidAmount,
+                    areaStatus);
+            })
+            .ToList();
+
+        var result = new RestaurantFloorPlanDto
+        {
+            BusinessId = area.BusinessId,
+            RestaurantAreaId = area.Id,
+            AreaName = area.Name,
+            CanvasWidth = area.CanvasWidth,
+            CanvasHeight = area.CanvasHeight,
+            BoundaryPointsJson = area.BoundaryPointsJson,
+            IsAreaActive = area.IsActive,
+            IsReservableAsWhole = area.IsReservableAsWhole,
+            WholeAreaResourceId = area.WholeAreaResourceId,
+            AreaStatus = (int)areaStatus,
+            AreaStatusText = GetAreaStatusText(areaStatus),
+            StatusAtUtc = statusAtUtc,
+            CurrentAreaReservationId = currentAreaReservation?.Id,
+            CurrentAreaReservationStartedAtUtc = currentAreaReservation?.ReservationAtUtc,
+            CurrentAreaReservationEndsAtUtc = currentAreaReservation is null
+    ? null
+    : currentAreaReservation.ReservationAtUtc.AddMinutes(
+        currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240) <= 0
+            ? 240
+            : currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240)),
+            CurrentAreaReservationCustomerName = currentAreaReservation?.CustomerName,
+            CurrentAreaReservationPartySize = currentAreaReservation?.PartySize,
+            NextAreaReservationId = nextAreaReservation?.Id,
+            NextAreaReservationAtUtc = nextAreaReservation?.ReservationAtUtc,
+            NextAreaReservationCustomerName = nextAreaReservation?.CustomerName,
+            NextAreaReservationPartySize = nextAreaReservation?.PartySize,
+            AreaReservationWarningText = BuildAreaReservationWarningText(
+    currentAreaReservation,
+    nextAreaReservation,
+    statusAtUtc),
+            UpcomingAreaReservations = upcomingAreaReservations
+    .Select(ToAreaReservationSummaryDto)
+    .ToList(),
+            UnassignedUpcomingReservationCount = unassignedUpcomingReservations.Count,
+            NextUnassignedReservationAtUtc = unassignedUpcomingReservations
+    .OrderBy(x => x.ReservationAtUtc)
+    .FirstOrDefault()
+    ?.ReservationAtUtc,
+            UnassignedUpcomingReservations = unassignedUpcomingReservations
+    .Select(ToUnassignedReservationDto)
+    .ToList(),
+            Elements = elements,
+            Resources = resourceDtos
+        };
+
+        return Ok(result);
+    }
+    private static RestaurantAreaReservationSummaryDto ToAreaReservationSummaryDto(
+    RestaurantAreaReservation entity)
+    {
+        return new RestaurantAreaReservationSummaryDto
+        {
+            ReservationId = entity.Id,
+            BusinessId = entity.BusinessId,
+            RestaurantAreaId = entity.RestaurantAreaId,
+            PartySize = entity.PartySize,
+            CustomerName = entity.CustomerName,
+            CustomerPhone = entity.CustomerPhone,
+            ReservationAtUtc = entity.ReservationAtUtc,
+            ExpectedDurationMin = entity.ExpectedDurationMin,
+            Status = (int)entity.Status,
+            StatusText = GetAreaReservationStatusText(entity.Status),
+            Note = entity.Note,
+            InternalNote = entity.InternalNote
+        };
+    }
+
+    private static string? BuildAreaReservationWarningText(
+        RestaurantAreaReservation? currentAreaReservation,
+        RestaurantAreaReservation? nextAreaReservation,
+        DateTime statusAtUtc)
+    {
+        if (currentAreaReservation is not null)
+        {
+            var durationMin = currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240);
+
+            if (durationMin <= 0)
+                durationMin = 240;
+
+            var endUtc = currentAreaReservation.ReservationAtUtc.AddMinutes(durationMin);
+
+            return $"Cela sala je trenutno rezervisana do {endUtc:HH:mm}.";
+        }
+
+        if (nextAreaReservation is null)
+            return null;
+
+        var minutesToReservation = (nextAreaReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
+        var reservationTimeText = nextAreaReservation.ReservationAtUtc.ToString("HH:mm");
+        var mustBeFreeByText = nextAreaReservation.ReservationAtUtc
+            .AddMinutes(-ReservationReleaseBeforeMinutes)
+            .ToString("HH:mm");
+
+        if (minutesToReservation <= ReservationSoftWarningMinutes)
+        {
+            return $"Cela sala je rezervisana uskoro u {reservationTimeText}. Sala treba da bude slobodna najkasnije do {mustBeFreeByText}.";
+        }
+
+        return $"Cela sala ima rezervaciju u {reservationTimeText}.";
+    }
+
+    private static string GetAreaReservationStatusText(RestaurantAreaReservationStatus status)
+    {
+        return status switch
+        {
+            RestaurantAreaReservationStatus.PendingApproval => "Čeka potvrdu",
+            RestaurantAreaReservationStatus.Confirmed => "Potvrđeno",
+            RestaurantAreaReservationStatus.Rejected => "Odbijeno",
+            RestaurantAreaReservationStatus.Cancelled => "Otkazano",
+            RestaurantAreaReservationStatus.Arrived => "Došli",
+            RestaurantAreaReservationStatus.NoShow => "Nisu došli",
+            RestaurantAreaReservationStatus.Completed => "Završeno",
+            _ => "Nepoznat status"
+        };
+    }
+
+    private static RestaurantUnassignedReservationDto ToUnassignedReservationDto(
+    RestaurantTableReservation entity)
+    {
+        return new RestaurantUnassignedReservationDto
+        {
+            ReservationId = entity.Id,
+            BusinessId = entity.BusinessId,
+            RestaurantAreaId = entity.RestaurantAreaId,
+            PartySize = entity.PartySize,
+            CustomerName = entity.CustomerName,
+            CustomerPhone = entity.CustomerPhone,
+            ReservationAtUtc = entity.ReservationAtUtc,
+            ExpectedDurationMin = entity.ExpectedDurationMin,
+            Status = (int)entity.Status,
+            StatusText = GetReservationStatusText(entity.Status),
+            Note = entity.Note,
+            InternalNote = entity.InternalNote
+        };
+    }
+
+    private static RestaurantTableReservationPreviewDto ToReservationPreviewDto(
+    RestaurantTableReservation entity)
+    {
+        return new RestaurantTableReservationPreviewDto
+        {
+            ReservationId = entity.Id,
+            ReservationAtUtc = entity.ReservationAtUtc,
+            PartySize = entity.PartySize,
+            CustomerName = entity.CustomerName,
+            CustomerPhone = entity.CustomerPhone,
+            Status = (int)entity.Status,
+            StatusText = GetReservationStatusText(entity.Status),
+            ExpectedDurationMin = entity.ExpectedDurationMin
+        };
+    }
+
+    private static RestaurantAreaVisualStatusDto GetAreaStatus(
+        bool isAreaActive,
+        RestaurantAreaReservation? currentAreaReservation,
+        RestaurantAreaReservation? nextAreaReservation,
+        DateTime statusAtUtc)
+    {
+        if (!isAreaActive)
+            return RestaurantAreaVisualStatusDto.Inactive;
+
+        if (currentAreaReservation is not null)
+            return RestaurantAreaVisualStatusDto.Occupied;
+
+        if (nextAreaReservation is not null)
+        {
+            var minutesToReservation = (nextAreaReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
+
+            if (minutesToReservation <= ReservationSoftWarningMinutes)
+                return RestaurantAreaVisualStatusDto.PendingReservation;
+        }
+
+        return RestaurantAreaVisualStatusDto.Available;
+    }
+
+    private static RestaurantFloorPlanResourceDto ToResourceDto(
+        Resource resource,
+        RestaurantTableSession? activeSession,
+        RestaurantTableReservation? nextReservation,
+        List<RestaurantTableReservation> upcomingReservations,
+        DateTime statusAtUtc,
+        List<RestaurantOrder> activeOrders,
+        List<RestaurantOrder> allOrders,
+        decimal paidAmount,
+        RestaurantAreaVisualStatusDto areaStatus)
+    {
+        var status = GetResourceStatus(resource, activeSession, nextReservation, statusAtUtc, areaStatus);
+        var latestOrder = activeOrders
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+
+        var billTotalAmount = allOrders.Sum(x => x.TotalAmount);
+        var remainingAmount = billTotalAmount - paidAmount;
+
+        if (remainingAmount < 0)
+            remainingAmount = 0;
+
+        return new RestaurantFloorPlanResourceDto
+        {
+            ResourceId = resource.Id,
+            BusinessId = resource.BusinessId,
+            Name = resource.Name,
+            ResourceType = (int)resource.ResourceType,
+            Capacity = resource.Capacity,
+            IsActive = resource.IsActive,
+            ResourceGroupId = resource.ResourceGroupId,
+            RestaurantAreaId = resource.RestaurantAreaId,
+            LayoutX = resource.LayoutX,
+            LayoutY = resource.LayoutY,
+            LayoutWidth = resource.LayoutWidth,
+            LayoutHeight = resource.LayoutHeight,
+            LayoutRotationDeg = resource.LayoutRotationDeg,
+            LayoutShape = (int)resource.LayoutShape,
+            LayoutPointsJson = resource.LayoutPointsJson,
+            Status = (int)status,
+            StatusText = GetResourceStatusText(status),
+            CurrentTableSessionId = activeSession?.Id,
+            CurrentAppointmentId = null,
+            OccupiedFromUtc = activeSession?.StartedAtUtc,
+            PartySize = activeSession?.PartySize,
+            CustomerName = activeSession?.CustomerName,
+            NextReservationAtUtc = nextReservation?.ReservationAtUtc,
+            NextReservationId = nextReservation?.Id,
+            NextReservationCustomerName = nextReservation?.CustomerName,
+            NextReservationPartySize = nextReservation?.PartySize,
+            UpcomingReservations = upcomingReservations
+    .OrderBy(x => x.ReservationAtUtc)
+    .Select(ToReservationPreviewDto)
+    .ToList(),
+            MustBeFreeByUtc = nextReservation?.ReservationAtUtc.AddMinutes(-ReservationReleaseBeforeMinutes),
+            ReservationWarningText = BuildReservationWarningText(nextReservation, statusAtUtc),
+            ActiveOrderCount = activeOrders.Count,
+            HasActiveOrders = activeOrders.Count > 0,
+            ActiveOrderTotalAmount = activeOrders.Sum(x => x.TotalAmount),
+            LatestOrderStatus = latestOrder is null ? null : (int)latestOrder.Status,
+            LatestOrderStatusText = latestOrder is null ? null : GetOrderStatusText(latestOrder.Status),
+            BillTotalAmount = billTotalAmount,
+            BillPaidAmount = paidAmount,
+            BillRemainingAmount = remainingAmount,
+            IsBillFullyPaid = billTotalAmount > 0 && paidAmount >= billTotalAmount
+        };
+    }
+
+    private static RestaurantResourceVisualStatusDto GetResourceStatus(
+        Resource resource,
+        RestaurantTableSession? activeSession,
+        RestaurantTableReservation? nextReservation,
+        DateTime statusAtUtc,
+        RestaurantAreaVisualStatusDto areaStatus)
+    {
+        if (!resource.IsActive)
+            return RestaurantResourceVisualStatusDto.Inactive;
+
+        if (areaStatus is RestaurantAreaVisualStatusDto.Occupied or RestaurantAreaVisualStatusDto.PendingReservation)
+            return RestaurantResourceVisualStatusDto.AreaOccupied;
+
+        if (activeSession is not null)
+            return RestaurantResourceVisualStatusDto.Occupied;
+
+        if (nextReservation is not null)
+        {
+            var minutesToReservation = (nextReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
+
+            if (minutesToReservation <= ReservationSoftWarningMinutes)
+                return RestaurantResourceVisualStatusDto.ReservedLater;
+        }
+
+        return RestaurantResourceVisualStatusDto.Available;
+    }
+
+    private static string? BuildReservationWarningText(
+        RestaurantTableReservation? nextReservation,
+        DateTime statusAtUtc)
+    {
+        if (nextReservation is null)
+            return null;
+
+        var minutesToReservation = (nextReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
+        var reservationTimeText = nextReservation.ReservationAtUtc.ToString("HH:mm");
+        var mustBeFreeByText = nextReservation.ReservationAtUtc
+            .AddMinutes(-ReservationReleaseBeforeMinutes)
+            .ToString("HH:mm");
+
+        if (minutesToReservation <= ReservationSoftWarningMinutes)
+        {
+            return $"Sto je rezervisan uskoro u {reservationTimeText}. Treba da bude slobodan najkasnije do {mustBeFreeByText}.";
+        }
+
+        return $"Sto ima rezervaciju u {reservationTimeText}. Ako ga zauzmete, treba ga osloboditi najkasnije do {mustBeFreeByText}.";
+    }
+
+    private static string GetAreaStatusText(RestaurantAreaVisualStatusDto status)
+    {
+        return status switch
+        {
+            RestaurantAreaVisualStatusDto.Available => "Sala slobodna",
+            RestaurantAreaVisualStatusDto.Occupied => "Sala zauzeta",
+            RestaurantAreaVisualStatusDto.PendingReservation => "Sala čeka potvrdu",
+            RestaurantAreaVisualStatusDto.Inactive => "Sala neaktivna",
+            _ => "Nepoznat status"
+        };
+    }
+
+    private static string GetResourceStatusText(RestaurantResourceVisualStatusDto status)
+    {
+        return status switch
+        {
+            RestaurantResourceVisualStatusDto.Available => "Slobodno",
+            RestaurantResourceVisualStatusDto.Occupied => "Zauzeto",
+            RestaurantResourceVisualStatusDto.ReservedLater => "Rezervisano uskoro",
+            RestaurantResourceVisualStatusDto.PendingReservation => "Čeka potvrdu",
+            RestaurantResourceVisualStatusDto.Inactive => "Neaktivno",
+            RestaurantResourceVisualStatusDto.AreaOccupied => "Sala zauzeta",
+            _ => "Nepoznat status"
+        };
+    }
+
+    private static string GetReservationStatusText(RestaurantTableReservationStatus status)
+    {
+        return status switch
+        {
+            RestaurantTableReservationStatus.PendingApproval => "Čeka potvrdu",
+            RestaurantTableReservationStatus.Confirmed => "Potvrđeno",
+            RestaurantTableReservationStatus.Rejected => "Odbijeno",
+            RestaurantTableReservationStatus.Cancelled => "Otkazano",
+            RestaurantTableReservationStatus.Arrived => "Došli",
+            RestaurantTableReservationStatus.NoShow => "Nisu došli",
+            _ => "Nepoznat status"
+        };
+    }
+
+    private static string GetOrderStatusText(RestaurantOrderStatus status)
+    {
+        return status switch
+        {
+            RestaurantOrderStatus.Draft => "Nacrt",
+            RestaurantOrderStatus.Submitted => "Poslato",
+            RestaurantOrderStatus.Preparing => "U pripremi",
+            RestaurantOrderStatus.Ready => "Spremno",
+            RestaurantOrderStatus.Served => "Posluženo",
+            RestaurantOrderStatus.Cancelled => "Otkazano",
+            _ => "Nepoznat status"
+        };
+    }
+}

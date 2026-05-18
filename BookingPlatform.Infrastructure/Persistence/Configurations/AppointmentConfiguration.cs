@@ -36,6 +36,12 @@ public sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appointm
         builder.Property(x => x.UpdatedAtUtc)
             .IsRequired();
 
+        builder.Property(x => x.ReservedResourceId);
+
+        builder.Property(x => x.PartySize);
+
+        builder.Property(x => x.ReleasedAtUtc);
+
         builder.HasIndex(x => x.BusinessCustomerId);
 
         builder.HasIndex(x => new
@@ -45,9 +51,21 @@ public sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appointm
             x.StartAtUtc
         });
 
+        builder.HasIndex(x => new
+        {
+            x.BusinessId,
+            x.ReservedResourceId,
+            x.StartAtUtc
+        });
+
         builder.HasOne<BusinessCustomer>()
             .WithMany()
             .HasForeignKey(x => x.BusinessCustomerId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.ReservedResource)
+            .WithMany()
+            .HasForeignKey(x => x.ReservedResourceId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

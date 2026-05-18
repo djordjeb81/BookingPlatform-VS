@@ -1,0 +1,28 @@
+﻿namespace BookingPlatform.Contracts.Restaurants;
+
+public sealed class RestaurantAreaReservationSummaryDto
+{
+    public long ReservationId { get; set; }
+
+    public long BusinessId { get; set; }
+
+    public long RestaurantAreaId { get; set; }
+
+    public int PartySize { get; set; }
+
+    public string CustomerName { get; set; } = string.Empty;
+
+    public string CustomerPhone { get; set; } = string.Empty;
+
+    public DateTime ReservationAtUtc { get; set; }
+
+    public int? ExpectedDurationMin { get; set; }
+
+    public int Status { get; set; }
+
+    public string StatusText { get; set; } = string.Empty;
+
+    public string? Note { get; set; }
+
+    public string? InternalNote { get; set; }
+}

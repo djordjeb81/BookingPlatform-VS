@@ -8,6 +8,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Globalization;
 using System.Text;
+using BookingPlatform.Contracts.Businesses;
+using BookingPlatform.Domain.Businesses;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -61,7 +63,7 @@ public sealed class CustomerPortalController : ControllerBase
     [ProducesResponseType(typeof(List<CustomerPortalBusinessDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<CustomerPortalBusinessDto>>> MyBusinesses(
-        CancellationToken cancellationToken)
+     CancellationToken cancellationToken)
     {
         var userId = TryGetUserId();
 
@@ -75,26 +77,49 @@ public sealed class CustomerPortalController : ControllerBase
         if (profile is null)
             return Ok(new List<CustomerPortalBusinessDto>());
 
-        var items = await _dbContext.BusinessCustomers
+        var customerLinks = await _dbContext.BusinessCustomers
             .AsNoTracking()
-.Where(x => x.CustomerProfileId == profile.Id && x.IsActive)
-            .Join(
-                _dbContext.Businesses.AsNoTracking(),
-                customer => customer.BusinessId,
-                business => business.Id,
-                (customer, business) => new CustomerPortalBusinessDto
-                {
-                    BusinessId = business.Id,
-                    BusinessName = business.Name,
-                    BusinessCustomerId = customer.Id,
-                    CustomerProfileId = profile.Id,
-                    CustomerName = profile.FullName,
-                    BusinessPhone = business.Phone,
-                    BusinessEmail = business.Email,
-                    City = business.City
-                })
-            .OrderBy(x => x.BusinessName)
+            .Where(x => x.CustomerProfileId == profile.Id && x.IsActive)
+            .Select(x => new
+            {
+                x.BusinessId,
+                BusinessCustomerId = x.Id
+            })
             .ToListAsync(cancellationToken);
+
+        if (customerLinks.Count == 0)
+            return Ok(new List<CustomerPortalBusinessDto>());
+
+        var businessCustomerIdByBusinessId = customerLinks
+            .ToDictionary(x => x.BusinessId, x => x.BusinessCustomerId);
+
+        var businessIds = customerLinks
+            .Select(x => x.BusinessId)
+            .ToList();
+
+        var businesses = await _dbContext.Businesses
+            .AsNoTracking()
+            .Include(x => x.FeatureSettings)
+            .Where(x => businessIds.Contains(x.Id))
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var items = businesses
+            .Select(business => new CustomerPortalBusinessDto
+            {
+                BusinessId = business.Id,
+                BusinessName = business.Name,
+                BusinessCustomerId = businessCustomerIdByBusinessId[business.Id],
+                CustomerProfileId = profile.Id,
+                CustomerName = profile.FullName,
+                BusinessType = (int)business.BusinessType,
+                BookingMode = (int)business.BookingMode,
+                FeatureSettings = ToFeatureSettingsDto(business.FeatureSettings, business.BookingMode),
+                BusinessPhone = business.Phone,
+                BusinessEmail = business.Email,
+                City = business.City
+            })
+            .ToList();
 
         return Ok(items);
     }
@@ -189,6 +214,7 @@ public sealed class CustomerPortalController : ControllerBase
         }
 
         var businesses = await query
+            .Include(x => x.FeatureSettings)
             .OrderBy(x => x.Name)
             .Take(500)
             .Select(x => new
@@ -203,6 +229,8 @@ public sealed class CustomerPortalController : ControllerBase
                 x.PostalCode,
                 x.Country,
                 BusinessType = (int)x.BusinessType,
+                BookingMode = (int)x.BookingMode,
+                x.FeatureSettings,
                 x.Latitude,
                 x.Longitude
             })
@@ -323,6 +351,8 @@ public sealed class CustomerPortalController : ControllerBase
                     PostalCode = x.PostalCode,
                     Country = x.Country,
                     BusinessType = x.BusinessType,
+                    BookingMode = x.BookingMode,
+                    FeatureSettings = ToFeatureSettingsDto(x.FeatureSettings, (BookingMode)x.BookingMode),
                     Latitude = businessLatitude,
                     Longitude = businessLongitude,
                     DistanceKm = distanceKm,
@@ -366,6 +396,7 @@ public sealed class CustomerPortalController : ControllerBase
 
         var business = await _dbContext.Businesses
             .AsNoTracking()
+            .Include(x => x.FeatureSettings)
             .Where(x => x.Id == businessId && x.IsActive)
             .Select(x => new
             {
@@ -379,6 +410,8 @@ public sealed class CustomerPortalController : ControllerBase
                 x.PostalCode,
                 x.Country,
                 BusinessType = (int)x.BusinessType,
+                BookingMode = (int)x.BookingMode,
+                x.FeatureSettings,
                 x.Latitude,
                 x.Longitude
             })
@@ -435,6 +468,8 @@ public sealed class CustomerPortalController : ControllerBase
             PostalCode = business.PostalCode,
             Country = business.Country,
             BusinessType = business.BusinessType,
+            BookingMode = business.BookingMode,
+            FeatureSettings = ToFeatureSettingsDto(business.FeatureSettings, (BookingMode)business.BookingMode),
             Latitude = latitude,
             Longitude = longitude,
             IsAlreadyConnected = businessCustomerId.HasValue,
@@ -1082,6 +1117,72 @@ public sealed class CustomerPortalController : ControllerBase
                   ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub);
 
         return long.TryParse(raw, out var userId) ? userId : null;
+    }
+
+    private static BusinessFeatureSettingsDto ToFeatureSettingsDto(
+    BusinessFeatureSettings? settings,
+    BookingMode bookingMode)
+    {
+        if (settings is null)
+            return CreateDefaultFeatureSettingsDto(bookingMode);
+
+        return new BusinessFeatureSettingsDto
+        {
+            ServiceAppointmentsEnabled = settings.ServiceAppointmentsEnabled,
+            TableReservationsEnabled = settings.TableReservationsEnabled,
+            FoodOrdersEnabled = settings.FoodOrdersEnabled,
+            DrinkOrdersEnabled = settings.DrinkOrdersEnabled,
+            TakeawayOrdersEnabled = settings.TakeawayOrdersEnabled,
+            DeliveryOrdersEnabled = settings.DeliveryOrdersEnabled,
+            EventHallReservationsEnabled = settings.EventHallReservationsEnabled,
+            AccommodationEnabled = settings.AccommodationEnabled,
+            ReviewsEnabled = settings.ReviewsEnabled
+        };
+    }
+
+    private static BusinessFeatureSettingsDto CreateDefaultFeatureSettingsDto(BookingMode bookingMode)
+    {
+        return bookingMode switch
+        {
+            BookingMode.Hospitality => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = true,
+                FoodOrdersEnabled = true,
+                DrinkOrdersEnabled = true,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            },
+
+            BookingMode.Accommodation => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = true,
+                ReviewsEnabled = true
+            },
+
+            _ => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = true,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
+                ReviewsEnabled = true
+            }
+        };
     }
 
     private sealed class CustomerBusinessConnectionRow

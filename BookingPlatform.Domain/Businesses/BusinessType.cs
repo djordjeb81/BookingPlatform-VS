@@ -6,5 +6,13 @@ public enum BusinessType
     Dentist = 2,
     BeautySalon = 3,
     Restaurant = 4,
-    ServiceShop = 5
+    ServiceShop = 5,
+
+    Cafe = 6,
+    FastFood = 7,
+    EventHall = 8,
+    Accommodation = 9,
+    Hotel = 10,
+    Motel = 11,
+    Other = 999
 }

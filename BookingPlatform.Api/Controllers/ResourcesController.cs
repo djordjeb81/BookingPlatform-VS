@@ -1,10 +1,10 @@
-﻿using BookingPlatform.Contracts.Resources;
+﻿using BookingPlatform.Contracts.Common;
+using BookingPlatform.Contracts.Resources;
 using BookingPlatform.Domain.Resources;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BookingPlatform.Contracts.Common;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -56,8 +56,17 @@ public sealed class ResourcesController : ApiControllerBase
                 CreatesOccupancy = x.CreatesOccupancy,
                 IsActive = x.IsActive,
                 ResourceGroupId = x.ResourceGroupId,
+                ResourceGroupName = x.ResourceGroup != null ? x.ResourceGroup.Name : null,
                 CustomerActionText = x.CustomerActionText,
-                ResourceGroupName = x.ResourceGroup != null ? x.ResourceGroup.Name : null
+
+                RestaurantAreaId = x.RestaurantAreaId,
+                LayoutX = x.LayoutX,
+                LayoutY = x.LayoutY,
+                LayoutWidth = x.LayoutWidth,
+                LayoutHeight = x.LayoutHeight,
+                LayoutRotationDeg = x.LayoutRotationDeg,
+                LayoutShape = (int)x.LayoutShape,
+                LayoutPointsJson = x.LayoutPointsJson
             })
             .ToListAsync(cancellationToken);
 
@@ -89,7 +98,6 @@ public sealed class ResourcesController : ApiControllerBase
         [FromBody] CreateResourceRequest request,
         CancellationToken cancellationToken)
     {
-
         var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
         if (accessResult is not null)
             return accessResult;
@@ -101,6 +109,7 @@ public sealed class ResourcesController : ApiControllerBase
             return BadRequest("Kapacitet mora biti veći od 0.");
 
         var businessExists = await DbContext.Businesses
+            .AsNoTracking()
             .AnyAsync(x => x.Id == request.BusinessId, cancellationToken);
 
         if (!businessExists)
@@ -114,6 +123,22 @@ public sealed class ResourcesController : ApiControllerBase
         if (groupValidationResult is not null)
             return groupValidationResult;
 
+        var areaValidationResult = await ValidateRestaurantAreaAsync(
+            request.BusinessId,
+            request.RestaurantAreaId,
+            cancellationToken);
+
+        if (areaValidationResult is not null)
+            return areaValidationResult;
+
+        var layoutValidationResult = ValidateLayoutFields(
+            request.LayoutWidth,
+            request.LayoutHeight,
+            request.LayoutRotationDeg);
+
+        if (layoutValidationResult is not null)
+            return layoutValidationResult;
+
         var entity = new Resource
         {
             BusinessId = request.BusinessId,
@@ -123,9 +148,17 @@ public sealed class ResourcesController : ApiControllerBase
             AllowParallelUsage = request.AllowParallelUsage,
             CreatesOccupancy = request.CreatesOccupancy,
             ResourceGroupId = request.ResourceGroupId,
+            RestaurantAreaId = request.RestaurantAreaId,
+            LayoutX = request.LayoutX,
+            LayoutY = request.LayoutY,
+            LayoutWidth = request.LayoutWidth,
+            LayoutHeight = request.LayoutHeight,
+            LayoutRotationDeg = request.LayoutRotationDeg,
+            LayoutShape = (LayoutShapeType)request.LayoutShape,
+            LayoutPointsJson = NormalizeJsonText(request.LayoutPointsJson),
             IsActive = true,
-            CreatedAtUtc = DateTime.UtcNow,
             CustomerActionText = NormalizeCustomerActionText(request.CustomerActionText),
+            CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
 
@@ -170,15 +203,39 @@ public sealed class ResourcesController : ApiControllerBase
         if (groupValidationResult is not null)
             return groupValidationResult;
 
+        var areaValidationResult = await ValidateRestaurantAreaAsync(
+            entity.BusinessId,
+            request.RestaurantAreaId,
+            cancellationToken);
+
+        if (areaValidationResult is not null)
+            return areaValidationResult;
+
+        var layoutValidationResult = ValidateLayoutFields(
+            request.LayoutWidth,
+            request.LayoutHeight,
+            request.LayoutRotationDeg);
+
+        if (layoutValidationResult is not null)
+            return layoutValidationResult;
+
         entity.Name = request.Name.Trim();
         entity.ResourceType = (ResourceType)request.ResourceType;
         entity.Capacity = request.Capacity;
         entity.AllowParallelUsage = request.AllowParallelUsage;
         entity.CreatesOccupancy = request.CreatesOccupancy;
         entity.ResourceGroupId = request.ResourceGroupId;
+        entity.RestaurantAreaId = request.RestaurantAreaId;
+        entity.LayoutX = request.LayoutX;
+        entity.LayoutY = request.LayoutY;
+        entity.LayoutWidth = request.LayoutWidth;
+        entity.LayoutHeight = request.LayoutHeight;
+        entity.LayoutRotationDeg = request.LayoutRotationDeg;
+        entity.LayoutShape = (LayoutShapeType)request.LayoutShape;
+        entity.LayoutPointsJson = NormalizeJsonText(request.LayoutPointsJson);
         entity.IsActive = request.IsActive;
-        entity.UpdatedAtUtc = DateTime.UtcNow;
         entity.CustomerActionText = NormalizeCustomerActionText(request.CustomerActionText);
+        entity.UpdatedAtUtc = DateTime.UtcNow;
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
@@ -271,7 +328,10 @@ public sealed class ResourcesController : ApiControllerBase
             await DbContext.StaffResourceAssignments.AnyAsync(x => x.ResourceId == id, cancellationToken) ||
             await DbContext.ServiceResourceRequirements.AnyAsync(x => x.ResourceId == id, cancellationToken) ||
             await DbContext.ServiceResourceUsages.AnyAsync(x => x.ResourceId == id, cancellationToken) ||
-            await DbContext.Appointments.AnyAsync(x => x.ResourceId == id, cancellationToken);
+            await DbContext.Appointments.AnyAsync(x =>
+                x.ResourceId == id ||
+                x.ReservedResourceId == id,
+                cancellationToken);
 
         if (hasDependencies)
         {
@@ -306,6 +366,45 @@ public sealed class ResourcesController : ApiControllerBase
         return null;
     }
 
+    private async Task<ActionResult?> ValidateRestaurantAreaAsync(
+        long businessId,
+        long? restaurantAreaId,
+        CancellationToken cancellationToken)
+    {
+        if (!restaurantAreaId.HasValue)
+            return null;
+
+        var areaExists = await DbContext.RestaurantAreas
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.Id == restaurantAreaId.Value &&
+                x.BusinessId == businessId &&
+                x.IsActive,
+                cancellationToken);
+
+        if (!areaExists)
+            return BadRequest("Izabrana sala ne postoji ili ne pripada ovoj radnji.");
+
+        return null;
+    }
+
+    private ActionResult? ValidateLayoutFields(
+        decimal? layoutWidth,
+        decimal? layoutHeight,
+        int layoutRotationDeg)
+    {
+        if (layoutWidth.HasValue && layoutWidth.Value <= 0)
+            return BadRequest("Širina na rasporedu mora biti veća od 0.");
+
+        if (layoutHeight.HasValue && layoutHeight.Value <= 0)
+            return BadRequest("Visina na rasporedu mora biti veća od 0.");
+
+        if (layoutRotationDeg < -360 || layoutRotationDeg > 360)
+            return BadRequest("Rotacija mora biti između -360 i 360 stepeni.");
+
+        return null;
+    }
+
     private static string? NormalizeCustomerActionText(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -316,6 +415,14 @@ public sealed class ResourcesController : ApiControllerBase
         return trimmed.Length > 200
             ? trimmed[..200]
             : trimmed;
+    }
+
+    private static string? NormalizeJsonText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value.Trim();
     }
 
     private static ResourceDto ToDto(Resource entity)
@@ -331,8 +438,17 @@ public sealed class ResourcesController : ApiControllerBase
             CreatesOccupancy = entity.CreatesOccupancy,
             IsActive = entity.IsActive,
             ResourceGroupId = entity.ResourceGroupId,
+            ResourceGroupName = entity.ResourceGroup?.Name,
             CustomerActionText = entity.CustomerActionText,
-            ResourceGroupName = entity.ResourceGroup?.Name
+
+            RestaurantAreaId = entity.RestaurantAreaId,
+            LayoutX = entity.LayoutX,
+            LayoutY = entity.LayoutY,
+            LayoutWidth = entity.LayoutWidth,
+            LayoutHeight = entity.LayoutHeight,
+            LayoutRotationDeg = entity.LayoutRotationDeg,
+            LayoutShape = (int)entity.LayoutShape,
+            LayoutPointsJson = entity.LayoutPointsJson
         };
     }
 }

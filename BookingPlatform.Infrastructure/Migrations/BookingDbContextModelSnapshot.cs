@@ -60,7 +60,16 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<int?>("PartySize")
+                        .HasColumnType("integer");
+
                     b.Property<long?>("PrimaryStaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("ReservedResourceId")
                         .HasColumnType("bigint");
 
                     b.Property<long?>("ResourceId")
@@ -82,7 +91,11 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     b.HasIndex("BusinessCustomerId");
 
+                    b.HasIndex("ReservedResourceId");
+
                     b.HasIndex("BusinessId", "BusinessCustomerId", "StartAtUtc");
+
+                    b.HasIndex("BusinessId", "ReservedResourceId", "StartAtUtc");
 
                     b.ToTable("appointments", (string)null);
                 });
@@ -416,6 +429,11 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<int>("BookingMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("BusinessType")
                         .HasColumnType("integer");
 
@@ -484,6 +502,70 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("businesses", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Businesses.BusinessFeatureSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("AccommodationEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("DeliveryOrdersEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("DrinkOrdersEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("EventHallReservationsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("FoodOrdersEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("ReviewsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("ServiceAppointmentsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("TableReservationsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("TakeawayOrdersEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId")
+                        .IsUnique();
+
+                    b.ToTable("business_feature_settings", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatConversation", b =>
@@ -838,13 +920,47 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("CreatesOccupancy")
-                        .HasColumnType("boolean");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("CustomerActionText")
-                        .HasColumnType("text");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<decimal?>("LayoutHeight")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("LayoutPointsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("LayoutRotationDeg")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("LayoutShape")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<decimal?>("LayoutWidth")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal?>("LayoutX")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal?>("LayoutY")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -857,12 +973,19 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<int>("ResourceType")
                         .HasColumnType("integer");
 
+                    b.Property<long?>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BusinessId");
+
                     b.HasIndex("ResourceGroupId");
+
+                    b.HasIndex("RestaurantAreaId");
 
                     b.ToTable("resources", (string)null);
                 });
@@ -931,6 +1054,1126 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("service_resource_requirements", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantArea", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("BoundaryPointsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("CanvasHeight")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1000);
+
+                    b.Property<int>("CanvasWidth")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1000);
+
+                    b.Property<int?>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsReservableAsWhole")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("WholeAreaResourceId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_areas", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantAreaReservation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ArrivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("ExpectedDurationMin")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InternalNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("PartySize")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReservationAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("ReservationAtUtc");
+
+                    b.HasIndex("RestaurantAreaId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("BusinessId", "RestaurantAreaId", "ReservationAtUtc", "Status");
+
+                    b.ToTable("restaurant_area_reservations", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantLayoutElement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("ElementType")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Height")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsObstacle")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("PointsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<long>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("RotationDeg")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("ShapeType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("Width")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal>("X")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal>("Y")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RestaurantAreaId");
+
+                    b.ToTable("restaurant_layout_elements", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuCategory", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_menu_categories", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CategoryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsAvailable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<bool>("SendToKitchen")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("BusinessId", "CategoryId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_menu_items", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOption", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsAvailable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long>("OptionGroupId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PriceDelta")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OptionGroupId");
+
+                    b.HasIndex("OptionGroupId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_menu_item_options", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOptionGroup", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("MaxSelected")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<long>("MenuItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("MinSelected")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MenuItemId");
+
+                    b.HasIndex("MenuItemId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_menu_item_option_groups", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOperationUnit", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("ReceivesCustomerChat")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("UnitType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "DisplayOrder");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("BusinessId", "UnitType");
+
+                    b.ToTable("restaurant_operation_units", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOperationUnitWorkingHour", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeSpan>("EndTime")
+                        .HasColumnType("interval");
+
+                    b.Property<bool>("IsClosed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<long>("OperationUnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<TimeSpan>("StartTime")
+                        .HasColumnType("interval");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("OperationUnitId");
+
+                    b.HasIndex("OperationUnitId", "DayOfWeek")
+                        .IsUnique();
+
+                    b.ToTable("restaurant_operation_unit_working_hours", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrder", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("DeliveryAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DeliveryNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("KitchenAcceptLaterMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("KitchenAcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("KitchenDecisionStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("KitchenRejectNote")
+                        .HasColumnType("text");
+
+                    b.Property<string>("KitchenRejectReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("KitchenRejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("OrderSource")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OrderType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RequestedPickupAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("SubtotalAmount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<long?>("TableResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("TableSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("OrderType");
+
+                    b.HasIndex("RequestedPickupAtUtc");
+
+                    b.HasIndex("RestaurantAreaId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TableResourceId");
+
+                    b.HasIndex("TableSessionId");
+
+                    b.ToTable("restaurant_orders", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderGuest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long>("OrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("OrderId", "DisplayOrder");
+
+                    b.ToTable("restaurant_order_guests", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("LineSubtotal")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<long>("MenuItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MenuItemNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long?>("OrderGuestId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SendToKitchenSnapshot")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("UnitPriceSnapshot")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MenuItemId");
+
+                    b.HasIndex("OrderGuestId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("restaurant_order_items", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderItemOption", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MenuItemOptionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OptionNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long>("OrderItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PriceDeltaSnapshot")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MenuItemOptionId");
+
+                    b.HasIndex("OrderItemId");
+
+                    b.ToTable("restaurant_order_item_options", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ActionCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ActionKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActionCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsActionRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("MessageType")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("OrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SenderOperationUnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SenderType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("SenderOperationUnitId");
+
+                    b.HasIndex("OrderId", "CreatedAtUtc");
+
+                    b.HasIndex("BusinessId", "IsActionRequired", "IsActionCompleted");
+
+                    b.HasIndex("BusinessId", "SenderOperationUnitId", "Id");
+
+                    b.ToTable("restaurant_order_messages", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessageRecipient", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsRead")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ReadAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("RecipientOperationUnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("RecipientType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("RecipientOperationUnitId");
+
+                    b.HasIndex("BusinessId", "RecipientOperationUnitId", "IsRead");
+
+                    b.HasIndex("BusinessId", "RecipientType", "RecipientOperationUnitId", "MessageId");
+
+                    b.ToTable("restaurant_order_message_recipients", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantPayment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("TableSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TableSessionId");
+
+                    b.ToTable("restaurant_payments", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantTableReservation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ArrivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CreatedTableSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("ExpectedDurationMin")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InternalNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("PartySize")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReservationAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("TableResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CreatedTableSessionId");
+
+                    b.HasIndex("ReservationAtUtc");
+
+                    b.HasIndex("RestaurantAreaId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TableResourceId");
+
+                    b.HasIndex("BusinessId", "ReservationAtUtc", "Status");
+
+                    b.ToTable("restaurant_table_reservations", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantTableSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("PartySize")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("RestaurantAreaId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("TableResourceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("RestaurantAreaId");
+
+                    b.HasIndex("TableResourceId");
+
+                    b.HasIndex("BusinessId", "TableResourceId", "Status");
+
+                    b.ToTable("restaurant_table_sessions", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.BusinessWorkingHour", b =>
@@ -1405,6 +2648,13 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("BusinessCustomerId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Resources.Resource", "ReservedResource")
+                        .WithMany()
+                        .HasForeignKey("ReservedResourceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ReservedResource");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Appointments.AppointmentStaffUsage", b =>
@@ -1441,6 +2691,17 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("AppUser");
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Businesses.BusinessFeatureSettings", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithOne("FeatureSettings")
+                        .HasForeignKey("BookingPlatform.Domain.Businesses.BusinessFeatureSettings", "BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Business");
                 });
@@ -1494,6 +2755,310 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantArea", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantAreaReservation", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
+                        .WithMany()
+                        .HasForeignKey("RestaurantAreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("RestaurantArea");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantLayoutElement", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
+                        .WithMany()
+                        .HasForeignKey("RestaurantAreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("RestaurantArea");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuCategory", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItem", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuCategory", "Category")
+                        .WithMany("Items")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOption", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOptionGroup", "OptionGroup")
+                        .WithMany("Options")
+                        .HasForeignKey("OptionGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OptionGroup");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOptionGroup", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuItem", "MenuItem")
+                        .WithMany("OptionGroups")
+                        .HasForeignKey("MenuItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MenuItem");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOperationUnit", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOperationUnitWorkingHour", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOperationUnit", "OperationUnit")
+                        .WithMany("WorkingHours")
+                        .HasForeignKey("OperationUnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("OperationUnit");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrder", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
+                        .WithMany()
+                        .HasForeignKey("RestaurantAreaId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantTableSession", "TableSession")
+                        .WithMany()
+                        .HasForeignKey("TableSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Business");
+
+                    b.Navigation("RestaurantArea");
+
+                    b.Navigation("TableSession");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderGuest", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrder", "Order")
+                        .WithMany("Guests")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderItem", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuItem", "MenuItem")
+                        .WithMany()
+                        .HasForeignKey("MenuItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrderGuest", "OrderGuest")
+                        .WithMany("Items")
+                        .HasForeignKey("OrderGuestId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrder", "Order")
+                        .WithMany("Items")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MenuItem");
+
+                    b.Navigation("Order");
+
+                    b.Navigation("OrderGuest");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderItemOption", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOption", "MenuItemOption")
+                        .WithMany()
+                        .HasForeignKey("MenuItemOptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrderItem", "OrderItem")
+                        .WithMany("Options")
+                        .HasForeignKey("OrderItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MenuItemOption");
+
+                    b.Navigation("OrderItem");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrder", "Order")
+                        .WithMany("Messages")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessageRecipient", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", "Message")
+                        .WithMany("Recipients")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantPayment", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantTableSession", "TableSession")
+                        .WithMany()
+                        .HasForeignKey("TableSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("TableSession");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantTableReservation", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantTableSession", "CreatedTableSession")
+                        .WithMany()
+                        .HasForeignKey("CreatedTableSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
+                        .WithMany()
+                        .HasForeignKey("RestaurantAreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Resources.Resource", "TableResource")
+                        .WithMany()
+                        .HasForeignKey("TableResourceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Business");
+
+                    b.Navigation("CreatedTableSession");
+
+                    b.Navigation("RestaurantArea");
+
+                    b.Navigation("TableResource");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantTableSession", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
+                        .WithMany()
+                        .HasForeignKey("RestaurantAreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Resources.Resource", "TableResource")
+                        .WithMany()
+                        .HasForeignKey("TableResourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("RestaurantArea");
+
+                    b.Navigation("TableResource");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleOverride", b =>
@@ -1583,12 +3148,58 @@ namespace BookingPlatform.Infrastructure.Migrations
 
             modelBuilder.Entity("BookingPlatform.Domain.Businesses.Business", b =>
                 {
+                    b.Navigation("FeatureSettings");
+
                     b.Navigation("UserMemberships");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Resources.ResourceGroup", b =>
                 {
                     b.Navigation("Resources");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuCategory", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItem", b =>
+                {
+                    b.Navigation("OptionGroups");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOptionGroup", b =>
+                {
+                    b.Navigation("Options");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOperationUnit", b =>
+                {
+                    b.Navigation("WorkingHours");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrder", b =>
+                {
+                    b.Navigation("Guests");
+
+                    b.Navigation("Items");
+
+                    b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderGuest", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderItem", b =>
+                {
+                    b.Navigation("Options");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", b =>
+                {
+                    b.Navigation("Recipients");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsage", b =>

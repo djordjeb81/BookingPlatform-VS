@@ -390,6 +390,7 @@ public sealed class AuthController : ControllerBase
         {
             Name = businessName,
             BusinessType = (BusinessType)request.BusinessType,
+            BookingMode = (BookingMode)request.BookingMode,
             Description = request.Description?.Trim(),
             Phone = request.Phone?.Trim(),
             Email = request.BusinessEmail?.Trim(),
@@ -483,13 +484,14 @@ public sealed class AuthController : ControllerBase
                 _dbContext.Businesses.AsNoTracking(),
                 membership => membership.BusinessId,
                 business => business.Id,
-                (membership, business) => new AuthBusinessMembershipDto
-                {
-                    BusinessId = business.Id,
-                    BusinessName = business.Name,
-                    Role = membership.Role.ToString(),
-                    IsActive = membership.IsActive
-                })
+(membership, business) => new AuthBusinessMembershipDto
+{
+    BusinessId = business.Id,
+    BusinessName = business.Name,
+    Role = membership.Role.ToString(),
+    IsActive = membership.IsActive,
+    BookingMode = (int)business.BookingMode
+})
             .OrderBy(x => x.BusinessName)
             .ToListAsync(cancellationToken);
 
@@ -526,13 +528,14 @@ public sealed class AuthController : ControllerBase
                 _dbContext.Businesses.AsNoTracking(),
                 membership => membership.BusinessId,
                 business => business.Id,
-                (membership, business) => new AuthBusinessMembershipDto
-                {
-                    BusinessId = business.Id,
-                    BusinessName = business.Name,
-                    Role = membership.Role.ToString(),
-                    IsActive = membership.IsActive
-                })
+(membership, business) => new AuthBusinessMembershipDto
+{
+    BusinessId = business.Id,
+    BusinessName = business.Name,
+    Role = membership.Role.ToString(),
+    IsActive = membership.IsActive,
+    BookingMode = (int)business.BookingMode
+})
             .OrderBy(x => x.BusinessName)
             .ToListAsync(cancellationToken);
 
