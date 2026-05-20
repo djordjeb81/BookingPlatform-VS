@@ -9,6 +9,10 @@ public sealed class RestaurantOrder : AuditableEntity
 
     public Business Business { get; set; } = null!;
 
+    public DateOnly OrderDateLocal { get; set; }
+
+    public int DailyOrderNumber { get; set; }
+
     public long? RestaurantAreaId { get; set; }
 
     public RestaurantArea? RestaurantArea { get; set; }

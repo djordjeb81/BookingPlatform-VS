@@ -71,6 +71,9 @@ public sealed class BookingDbContext : DbContext
     public DbSet<RestaurantTableReservation> RestaurantTableReservations => Set<RestaurantTableReservation>();
     public DbSet<RestaurantAreaReservation> RestaurantAreaReservations => Set<RestaurantAreaReservation>();
     public DbSet<RestaurantOrderGuest> RestaurantOrderGuests => Set<RestaurantOrderGuest>();
+    public DbSet<RestaurantAddonGroup> RestaurantAddonGroups => Set<RestaurantAddonGroup>();
+
+    public DbSet<RestaurantAddon> RestaurantAddons => Set<RestaurantAddon>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -324,6 +327,94 @@ public sealed class BookingDbContext : DbContext
                 .HasForeignKey(x => x.OrderId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired(false);
+        });
+
+        modelBuilder.Entity<RestaurantAddonGroup>(entity =>
+        {
+            entity.ToTable("restaurant_addon_groups");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .HasMaxLength(160)
+                .IsRequired();
+
+            entity.HasIndex(x => x.BusinessId);
+
+            entity.HasIndex(x => new { x.BusinessId, x.Name });
+
+            entity.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RestaurantAddon>(entity =>
+        {
+            entity.ToTable("restaurant_addons");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .HasMaxLength(160)
+                .IsRequired();
+
+            entity.Property(x => x.PriceDelta)
+                .HasPrecision(18, 2);
+
+            entity.HasIndex(x => x.BusinessId);
+
+            entity.HasIndex(x => x.AddonGroupId);
+
+            entity.HasIndex(x => new { x.BusinessId, x.Name });
+
+            entity.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.AddonGroup)
+                .WithMany(x => x.Addons)
+                .HasForeignKey(x => x.AddonGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RestaurantOrderItemOption>(entity =>
+        {
+            entity.ToTable("restaurant_order_item_options");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.OptionNameSnapshot)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(x => x.PriceDeltaSnapshot)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.AmountMode)
+                .HasConversion<int>();
+
+            entity.HasIndex(x => x.OrderItemId);
+
+            entity.HasIndex(x => x.MenuItemOptionId);
+
+            entity.HasIndex(x => x.RestaurantAddonId);
+
+            entity.HasOne(x => x.OrderItem)
+                .WithMany(x => x.Options)
+                .HasForeignKey(x => x.OrderItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.MenuItemOption)
+                .WithMany()
+                .HasForeignKey(x => x.MenuItemOptionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RestaurantAddon)
+                .WithMany()
+                .HasForeignKey(x => x.RestaurantAddonId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<RestaurantOrderMessageRecipient>(entity =>

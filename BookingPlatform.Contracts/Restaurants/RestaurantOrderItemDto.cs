@@ -22,6 +22,10 @@ public sealed class RestaurantOrderItemDto
 
     public bool SendToKitchenSnapshot { get; set; }
 
+    public bool IsReady { get; set; }
+
+    public DateTime? ReadyAtUtc { get; set; }
+
     public string? Note { get; set; }
 
     public List<RestaurantOrderItemOptionDto> Options { get; set; } = new();

@@ -6,6 +6,12 @@ public sealed class RestaurantOrderDto
 
     public long BusinessId { get; set; }
 
+    public DateOnly OrderDateLocal { get; set; }
+
+    public int DailyOrderNumber { get; set; }
+
+    public string DisplayOrderNumberText { get; set; } = string.Empty;
+
     public long? RestaurantAreaId { get; set; }
 
     public long? TableResourceId { get; set; }

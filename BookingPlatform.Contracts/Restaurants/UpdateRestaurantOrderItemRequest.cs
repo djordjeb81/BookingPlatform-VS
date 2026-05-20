@@ -8,5 +8,8 @@ public sealed class UpdateRestaurantOrderItemRequest
 
     public string? Note { get; set; }
 
+    // Staro polje ostavljamo za kompatibilnost, ali novu logiku radimo preko Addons.
     public List<long> MenuItemOptionIds { get; set; } = new();
+
+    public List<RestaurantOrderItemAddonSelectionDto> Addons { get; set; } = new();
 }

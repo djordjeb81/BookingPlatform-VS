@@ -11,4 +11,5 @@ public sealed class AddRestaurantOrderItemRequest
     public string? Note { get; set; }
 
     public List<long> MenuItemOptionIds { get; set; } = new();
+    public List<RestaurantOrderItemAddonSelectionDto> Addons { get; set; } = new();
 }

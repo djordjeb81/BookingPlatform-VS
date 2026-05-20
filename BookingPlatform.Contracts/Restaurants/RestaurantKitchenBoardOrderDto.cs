@@ -4,11 +4,18 @@ public sealed class RestaurantKitchenBoardOrderDto
 {
     public long OrderId { get; set; }
 
+    public DateOnly OrderDateLocal { get; set; }
+
+    public int DailyOrderNumber { get; set; }
+
+    public string DisplayOrderNumberText { get; set; } = string.Empty;
+
     public long BusinessId { get; set; }
 
     public long? RestaurantAreaId { get; set; }
 
     public long? TableResourceId { get; set; }
+    public string? TableName { get; set; }
 
     public long? TableSessionId { get; set; }
 

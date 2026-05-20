@@ -26,6 +26,10 @@ public sealed class RestaurantOrderItem : AuditableEntity
 
     public bool SendToKitchenSnapshot { get; set; } = true;
 
+    public bool IsReady { get; set; }
+
+    public DateTime? ReadyAtUtc { get; set; }
+
     public string? Note { get; set; }
 
     public ICollection<RestaurantOrderItemOption> Options { get; set; } =

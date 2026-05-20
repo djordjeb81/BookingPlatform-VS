@@ -3,6 +3,7 @@ using System;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BookingPlatform.Infrastructure.Migrations
 {
     [DbContext(typeof(BookingDbContext))]
-    partial class BookingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260519212130_AddRestaurantAddons")]
+    partial class AddRestaurantAddons
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1722,9 +1725,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<int>("DailyOrderNumber")
-                        .HasColumnType("integer");
-
                     b.Property<string>("DeliveryAddress")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -1754,9 +1754,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<string>("Note")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
-
-                    b.Property<DateOnly>("OrderDateLocal")
-                        .HasColumnType("date");
 
                     b.Property<int>("OrderSource")
                         .HasColumnType("integer");
@@ -1808,11 +1805,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("TableResourceId");
 
                     b.HasIndex("TableSessionId");
-
-                    b.HasIndex("BusinessId", "OrderDateLocal");
-
-                    b.HasIndex("BusinessId", "OrderDateLocal", "DailyOrderNumber")
-                        .IsUnique();
 
                     b.ToTable("restaurant_orders", (string)null);
                 });
@@ -1926,29 +1918,23 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
-                    b.Property<int>("AmountMode")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("MenuItemOptionId")
+                    b.Property<long>("MenuItemOptionId")
                         .HasColumnType("bigint");
 
                     b.Property<string>("OptionNameSnapshot")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
 
                     b.Property<long>("OrderItemId")
                         .HasColumnType("bigint");
 
                     b.Property<decimal>("PriceDeltaSnapshot")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<long?>("RestaurantAddonId")
-                        .HasColumnType("bigint");
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1958,8 +1944,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("MenuItemOptionId");
 
                     b.HasIndex("OrderItemId");
-
-                    b.HasIndex("RestaurantAddonId");
 
                     b.ToTable("restaurant_order_item_options", (string)null);
                 });
@@ -3088,7 +3072,8 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantMenuItemOption", "MenuItemOption")
                         .WithMany()
                         .HasForeignKey("MenuItemOptionId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantOrderItem", "OrderItem")
                         .WithMany("Options")
@@ -3096,16 +3081,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantAddon", "RestaurantAddon")
-                        .WithMany()
-                        .HasForeignKey("RestaurantAddonId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MenuItemOption");
 
                     b.Navigation("OrderItem");
-
-                    b.Navigation("RestaurantAddon");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", b =>

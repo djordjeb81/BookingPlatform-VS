@@ -126,13 +126,14 @@ public sealed class RestaurantOrdersController : ApiControllerBase
 .Where(x =>
     x.BusinessId == businessId &&
     (
-        x.Status == RestaurantOrderStatus.Submitted ||
-        x.Status == RestaurantOrderStatus.Preparing ||
-        x.Status == RestaurantOrderStatus.Ready ||
-        (
-            x.Status == RestaurantOrderStatus.Cancelled &&
-            x.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.Rejected
-        )
+x.Status == RestaurantOrderStatus.Submitted ||
+x.Status == RestaurantOrderStatus.Preparing ||
+x.Status == RestaurantOrderStatus.Ready ||
+x.Status == RestaurantOrderStatus.Served ||
+(
+    x.Status == RestaurantOrderStatus.Cancelled &&
+    x.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.Rejected
+)
     ));
 
         if (restaurantAreaId.HasValue)
@@ -147,6 +148,24 @@ public sealed class RestaurantOrdersController : ApiControllerBase
             .Take(200)
             .ToListAsync(cancellationToken);
 
+        var tableResourceIds = orders
+    .Where(x => x.TableResourceId.HasValue)
+    .Select(x => x.TableResourceId!.Value)
+    .Distinct()
+    .ToList();
+
+        var tableNamesById = tableResourceIds.Count == 0
+            ? new Dictionary<long, string>()
+            : await DbContext.Resources
+                .AsNoTracking()
+                .Where(x =>
+                    x.BusinessId == businessId &&
+                    tableResourceIds.Contains(x.Id))
+                .ToDictionaryAsync(
+                    x => x.Id,
+                    x => x.Name,
+                    cancellationToken);
+
         var result = orders
             .Where(order =>
                 order.OrderSource == RestaurantOrderSource.KitchenDesk ||
@@ -154,9 +173,16 @@ public sealed class RestaurantOrdersController : ApiControllerBase
             .Select(order => new RestaurantKitchenBoardOrderDto
             {
                 OrderId = order.Id,
+                OrderDateLocal = order.OrderDateLocal,
+                DailyOrderNumber = order.DailyOrderNumber,
+                DisplayOrderNumberText = FormatDisplayOrderNumber(order.DailyOrderNumber),
                 BusinessId = order.BusinessId,
                 RestaurantAreaId = order.RestaurantAreaId,
                 TableResourceId = order.TableResourceId,
+                TableName = order.TableResourceId.HasValue &&
+            tableNamesById.TryGetValue(order.TableResourceId.Value, out var tableName)
+    ? tableName
+    : null,
                 TableSessionId = order.TableSessionId,
                 OrderType = (int)order.OrderType,
                 OrderSource = (int)order.OrderSource,
@@ -202,6 +228,8 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         Quantity = item.Quantity,
         LineSubtotal = item.LineSubtotal,
         SendToKitchenSnapshot = item.SendToKitchenSnapshot,
+        IsReady = item.IsReady,
+        ReadyAtUtc = item.ReadyAtUtc,
         Note = item.Note,
         Options = item.Options
                             .OrderBy(x => x.Id)
@@ -210,8 +238,11 @@ public sealed class RestaurantOrdersController : ApiControllerBase
                                 Id = option.Id,
                                 OrderItemId = option.OrderItemId,
                                 MenuItemOptionId = option.MenuItemOptionId,
+                                RestaurantAddonId = option.RestaurantAddonId,
                                 OptionNameSnapshot = option.OptionNameSnapshot,
-                                PriceDeltaSnapshot = option.PriceDeltaSnapshot
+                                PriceDeltaSnapshot = option.PriceDeltaSnapshot,
+                                AmountMode = (int)option.AmountMode,
+                                AmountModeText = GetAddonAmountModeText(option.AmountMode)
                             })
                             .ToList()
                     })
@@ -552,9 +583,18 @@ public sealed class RestaurantOrdersController : ApiControllerBase
                     : string.Join(", ", item.Options
                         .OrderBy(o => o.OptionNameSnapshot)
                         .Select(o =>
-                            o.PriceDeltaSnapshot == 0
-                                ? o.OptionNameSnapshot
-                                : $"{o.OptionNameSnapshot} +{o.PriceDeltaSnapshot:0.##}"));
+                        {
+                            var amountText = o.AmountMode switch
+                            {
+                                RestaurantAddonAmountMode.Less => " (malo)",
+                                RestaurantAddonAmountMode.More => " (više)",
+                                _ => ""
+                            };
+
+                            return o.PriceDeltaSnapshot == 0
+                                ? $"{o.OptionNameSnapshot}{amountText}"
+                                : $"{o.OptionNameSnapshot}{amountText} +{o.PriceDeltaSnapshot:0.##}";
+                        }));
 
                 return new RestaurantTableBillLineDto
                 {
@@ -682,10 +722,17 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var orderDateLocal = GetRestaurantOrderLocalDate(now);
+        var dailyOrderNumber = await GetNextDailyOrderNumberAsync(
+            request.BusinessId,
+            orderDateLocal,
+            cancellationToken);
 
         var entity = new RestaurantOrder
         {
             BusinessId = request.BusinessId,
+            OrderDateLocal = orderDateLocal,
+            DailyOrderNumber = dailyOrderNumber,
             RestaurantAreaId = request.RestaurantAreaId,
             TableResourceId = request.TableResourceId,
             TableSessionId = request.TableSessionId,
@@ -906,7 +953,7 @@ public sealed class RestaurantOrdersController : ApiControllerBase
             request.MenuItemId,
             request.Quantity,
             request.Note,
-            request.MenuItemOptionIds,
+            request.Addons,
             cancellationToken);
 
         if (itemResult.Error is not null)
@@ -951,7 +998,7 @@ public sealed class RestaurantOrdersController : ApiControllerBase
             existingItem.MenuItemId,
             request.Quantity,
             request.Note,
-            request.MenuItemOptionIds,
+            request.Addons,
             cancellationToken);
 
         if (itemResult.Error is not null)
@@ -981,6 +1028,140 @@ public sealed class RestaurantOrdersController : ApiControllerBase
 
         var dtoEntity = await LoadOrderAsync(order.Id, asTracking: false, cancellationToken);
         return Ok(ToDto(dtoEntity!));
+    }
+
+    [HttpPost("{orderId:long}/items/{orderItemId:long}/toggle-ready")]
+    public async Task<ActionResult<RestaurantOrderDto>> ToggleOrderItemReady(
+      [FromRoute] long orderId,
+      [FromRoute] long orderItemId,
+      CancellationToken cancellationToken)
+    {
+        var order = await LoadOrderAsync(orderId, asTracking: true, cancellationToken);
+
+        if (order is null)
+            return NotFound("Narudžbina ne postoji.");
+
+        var accessResult = await EnsureBusinessWriteAccessAsync(order.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        if (order.Status is RestaurantOrderStatus.Draft)
+            return BadRequest("Artikal može da se označi kao spreman tek kada je narudžbina poslata.");
+
+        if (order.Status is RestaurantOrderStatus.Cancelled or RestaurantOrderStatus.Served)
+            return BadRequest("Završena ili otkazana narudžbina ne može da menja spremnost artikala.");
+
+        var item = order.Items.FirstOrDefault(x => x.Id == orderItemId);
+
+        if (item is null)
+            return NotFound("Stavka narudžbine ne postoji.");
+
+        var now = DateTime.UtcNow;
+        var wasReady = item.IsReady;
+        var previousOrderStatus = order.Status;
+
+        item.IsReady = !item.IsReady;
+        item.ReadyAtUtc = item.IsReady ? now : null;
+        item.UpdatedAtUtc = now;
+        order.UpdatedAtUtc = now;
+
+        if (!wasReady && item.IsReady)
+        {
+            if (order.OrderSource != RestaurantOrderSource.KitchenDesk)
+            {
+                var guestName = order.Guests
+                    .FirstOrDefault(x => x.Id == item.OrderGuestId)
+                    ?.Name;
+
+                var guestText = string.IsNullOrWhiteSpace(guestName)
+                    ? ""
+                    : $" ({guestName})";
+
+                await AddOrderMessageAsync(
+                    order,
+                    RestaurantOrderMessageSenderType.Kitchen,
+                    RestaurantOperationUnitType.Kitchen,
+                    new[] { RestaurantOperationUnitType.DiningRoom },
+                    RestaurantOrderMessageType.Text,
+                    $"Artikal je spreman: {item.MenuItemNameSnapshot}{guestText}.",
+                    actionKey: null,
+                    isActionRequired: false,
+                    cancellationToken);
+            }
+        }
+
+        var kitchenItems = order.Items
+            .Where(x => x.SendToKitchenSnapshot)
+            .ToList();
+
+        if (kitchenItems.Count == 0)
+            kitchenItems = order.Items.ToList();
+
+        var allKitchenItemsReady =
+            kitchenItems.Count > 0 &&
+            kitchenItems.All(x => x.IsReady);
+
+        if (allKitchenItemsReady)
+        {
+            if (order.Status != RestaurantOrderStatus.Ready)
+            {
+                order.Status = RestaurantOrderStatus.Ready;
+                order.UpdatedAtUtc = now;
+
+                if (order.SubmittedAtUtc is null)
+                    order.SubmittedAtUtc = now;
+
+                await AddOrderMessageAsync(
+                    order,
+                    RestaurantOrderMessageSenderType.Kitchen,
+                    RestaurantOperationUnitType.Kitchen,
+                    new[] { RestaurantOperationUnitType.DiningRoom },
+                    RestaurantOrderMessageType.OrderReady,
+                    "Svi artikli su spremni. Porudžbina je spremna.",
+                    actionKey: null,
+                    isActionRequired: false,
+                    cancellationToken);
+            }
+        }
+        else if (previousOrderStatus == RestaurantOrderStatus.Ready)
+        {
+            order.Status =
+                order.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.Accepted ||
+                order.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.WaitingAcceptedByCustomer
+                    ? RestaurantOrderStatus.Preparing
+                    : RestaurantOrderStatus.Submitted;
+
+            order.UpdatedAtUtc = now;
+
+            await AddOrderMessageAsync(
+                order,
+                RestaurantOrderMessageSenderType.Kitchen,
+                RestaurantOperationUnitType.Kitchen,
+                new[] { RestaurantOperationUnitType.DiningRoom },
+                RestaurantOrderMessageType.OrderPreparing,
+                "Porudžbina više nije kompletno spremna.",
+                actionKey: null,
+                isActionRequired: false,
+                cancellationToken);
+        }
+
+        await DbContext.SaveChangesAsync(cancellationToken);
+
+        var activityType = order.Status switch
+        {
+            RestaurantOrderStatus.Ready => "RestaurantOrderReady",
+            RestaurantOrderStatus.Preparing => "RestaurantOrderPreparing",
+            _ => item.IsReady
+                ? "RestaurantOrderItemReady"
+                : "RestaurantOrderItemNotReady"
+        };
+
+        await NotifyRestaurantOrderChangedAsync(
+            order,
+            activityType,
+            cancellationToken);
+
+        return Ok(ToDto(order));
     }
 
     [HttpPost("{orderId:long}/kitchen-accept")]
@@ -1659,13 +1840,13 @@ new
     }
 
     private async Task<BuildOrderItemResult> BuildOrderItemAsync(
-       RestaurantOrder order,
-       long? orderGuestId,
-       long menuItemId,
-       int quantity,
-       string? note,
-       List<long> menuItemOptionIds,
-       CancellationToken cancellationToken)
+    RestaurantOrder order,
+    long? orderGuestId,
+    long menuItemId,
+    int quantity,
+    string? note,
+    List<RestaurantOrderItemAddonSelectionDto> addons,
+    CancellationToken cancellationToken)
     {
         if (menuItemId <= 0)
             return BuildOrderItemResult.Fail("menuItemId je obavezan.");
@@ -1693,27 +1874,44 @@ new
         if (menuItem is null)
             return BuildOrderItemResult.Fail("Artikal ne postoji ili trenutno nije dostupan.");
 
-        var distinctOptionIds = menuItemOptionIds
+        addons ??= new List<RestaurantOrderItemAddonSelectionDto>();
+
+        var normalizedAddonSelections = addons
+            .Where(x => x.AddonId > 0)
+            .GroupBy(x => x.AddonId)
+            .Select(g => g.Last())
+            .ToList();
+
+        foreach (var addonSelection in normalizedAddonSelections)
+        {
+            if (!Enum.IsDefined(typeof(RestaurantAddonAmountMode), addonSelection.AmountMode))
+                return BuildOrderItemResult.Fail("Nepoznata mera dodatka.");
+        }
+
+        var addonIds = normalizedAddonSelections
+            .Select(x => x.AddonId)
             .Distinct()
             .ToList();
 
-        var options = distinctOptionIds.Count == 0
-            ? new List<RestaurantMenuItemOption>()
-            : await DbContext.RestaurantMenuItemOptions
+        var selectedAddons = addonIds.Count == 0
+            ? new List<RestaurantAddon>()
+            : await DbContext.RestaurantAddons
                 .AsNoTracking()
-                .Include(x => x.OptionGroup)
                 .Where(x =>
-                    distinctOptionIds.Contains(x.Id) &&
-                    x.OptionGroup.MenuItemId == menuItemId &&
+                    addonIds.Contains(x.Id) &&
+                    x.BusinessId == order.BusinessId &&
                     x.IsActive &&
-                    x.IsAvailable)
+                    x.IsAvailable &&
+                    x.AddonGroup.IsActive)
                 .ToListAsync(cancellationToken);
 
-        if (options.Count != distinctOptionIds.Count)
-            return BuildOrderItemResult.Fail("Jedan ili više dodataka nisu dostupni za izabrani artikal.");
+        if (selectedAddons.Count != addonIds.Count)
+            return BuildOrderItemResult.Fail("Jedan ili više dodataka nisu dostupni.");
 
-        var optionTotal = options.Sum(x => x.PriceDelta);
-        var unitPrice = menuItem.Price + optionTotal;
+        var addonById = selectedAddons.ToDictionary(x => x.Id);
+
+        var addonTotal = selectedAddons.Sum(x => x.PriceDelta);
+        var unitPrice = menuItem.Price + addonTotal;
         var lineSubtotal = unitPrice * quantity;
         var now = DateTime.UtcNow;
 
@@ -1730,14 +1928,21 @@ new
             Note = NormalizeText(note, 1000),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
-            Options = options
-                .Select(option => new RestaurantOrderItemOption
+            Options = normalizedAddonSelections
+                .Select(selection =>
                 {
-                    MenuItemOptionId = option.Id,
-                    OptionNameSnapshot = option.Name,
-                    PriceDeltaSnapshot = option.PriceDelta,
-                    CreatedAtUtc = now,
-                    UpdatedAtUtc = now
+                    var addon = addonById[selection.AddonId];
+
+                    return new RestaurantOrderItemOption
+                    {
+                        RestaurantAddonId = addon.Id,
+                        MenuItemOptionId = null,
+                        OptionNameSnapshot = addon.Name,
+                        PriceDeltaSnapshot = addon.PriceDelta,
+                        AmountMode = (RestaurantAddonAmountMode)selection.AmountMode,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    };
                 })
                 .ToList()
         };
@@ -1894,46 +2099,51 @@ new
             Quantity = item.Quantity,
             LineSubtotal = item.LineSubtotal,
             SendToKitchenSnapshot = item.SendToKitchenSnapshot,
+            IsReady = item.IsReady,
+            ReadyAtUtc = item.ReadyAtUtc,
             Note = item.Note,
             Options = item.Options
-                .OrderBy(x => x.Id)
-                .Select(option => new RestaurantOrderItemOptionDto
-                {
-                    Id = option.Id,
-                    OrderItemId = option.OrderItemId,
-                    MenuItemOptionId = option.MenuItemOptionId,
-                    OptionNameSnapshot = option.OptionNameSnapshot,
-                    PriceDeltaSnapshot = option.PriceDeltaSnapshot
-                })
-                .ToList()
+    .OrderBy(x => x.Id)
+    .Select(option => new RestaurantOrderItemOptionDto
+    {
+        Id = option.Id,
+        OrderItemId = option.OrderItemId,
+        MenuItemOptionId = option.MenuItemOptionId,
+        RestaurantAddonId = option.RestaurantAddonId,
+        OptionNameSnapshot = option.OptionNameSnapshot,
+        PriceDeltaSnapshot = option.PriceDeltaSnapshot,
+        AmountMode = (int)option.AmountMode,
+        AmountModeText = GetAddonAmountModeText(option.AmountMode)
+    })
+    .ToList()
         };
     }
 
-private static RestaurantOrderMessageDto ToMessageDto(RestaurantOrderMessage entity)
-{
-    return new RestaurantOrderMessageDto
+    private static RestaurantOrderMessageDto ToMessageDto(RestaurantOrderMessage entity)
     {
-        Id = entity.Id,
-        BusinessId = entity.BusinessId,
-        OrderId = entity.OrderId,
-        SenderType = (int)entity.SenderType,
-        SenderTypeText = GetOrderMessageSenderTypeText(entity.SenderType),
-        SenderOperationUnitId = entity.SenderOperationUnitId,
-        MessageType = (int)entity.MessageType,
-        MessageTypeText = GetOrderMessageTypeText(entity.MessageType),
-        Text = entity.Text,
-        ActionKey = entity.ActionKey,
-        IsActionRequired = entity.IsActionRequired,
-        IsActionCompleted = entity.IsActionCompleted,
-        ActionCompletedAtUtc = entity.ActionCompletedAtUtc,
-        CreatedAtUtc = entity.CreatedAtUtc,
-        RecipientOperationUnitIds = entity.Recipients
-            .Where(x => x.RecipientOperationUnitId.HasValue)
-            .Select(x => x.RecipientOperationUnitId!.Value)
-            .Distinct()
-            .ToList()
-    };
-}
+        return new RestaurantOrderMessageDto
+        {
+            Id = entity.Id,
+            BusinessId = entity.BusinessId,
+            OrderId = entity.OrderId,
+            SenderType = (int)entity.SenderType,
+            SenderTypeText = GetOrderMessageSenderTypeText(entity.SenderType),
+            SenderOperationUnitId = entity.SenderOperationUnitId,
+            MessageType = (int)entity.MessageType,
+            MessageTypeText = GetOrderMessageTypeText(entity.MessageType),
+            Text = entity.Text,
+            ActionKey = entity.ActionKey,
+            IsActionRequired = entity.IsActionRequired,
+            IsActionCompleted = entity.IsActionCompleted,
+            ActionCompletedAtUtc = entity.ActionCompletedAtUtc,
+            CreatedAtUtc = entity.CreatedAtUtc,
+            RecipientOperationUnitIds = entity.Recipients
+                .Where(x => x.RecipientOperationUnitId.HasValue)
+                .Select(x => x.RecipientOperationUnitId!.Value)
+                .Distinct()
+                .ToList()
+        };
+    }
 
     private static RestaurantOrderDto ToDto(RestaurantOrder entity)
     {
@@ -1941,6 +2151,9 @@ private static RestaurantOrderMessageDto ToMessageDto(RestaurantOrderMessage ent
         {
             Id = entity.Id,
             BusinessId = entity.BusinessId,
+            OrderDateLocal = entity.OrderDateLocal,
+            DailyOrderNumber = entity.DailyOrderNumber,
+            DisplayOrderNumberText = FormatDisplayOrderNumber(entity.DailyOrderNumber),
             RestaurantAreaId = entity.RestaurantAreaId,
             TableResourceId = entity.TableResourceId,
             TableSessionId = entity.TableSessionId,
@@ -2024,6 +2237,16 @@ private static RestaurantOrderMessageDto ToMessageDto(RestaurantOrderMessage ent
         };
     }
 
+    private static string GetAddonAmountModeText(RestaurantAddonAmountMode amountMode)
+    {
+        return amountMode switch
+        {
+            RestaurantAddonAmountMode.Less => "malo",
+            RestaurantAddonAmountMode.More => "više",
+            _ => "normalno"
+        };
+    }
+
     private static string GetPaymentMethodText(RestaurantPaymentMethod method)
     {
         return method switch
@@ -2088,6 +2311,55 @@ private static RestaurantOrderMessageDto ToMessageDto(RestaurantOrderMessage ent
             RestaurantOrderSource.Other => "Ostalo",
             _ => source.ToString()
         };
+    }
+
+    private async Task<int> GetNextDailyOrderNumberAsync(
+    long businessId,
+    DateOnly orderDateLocal,
+    CancellationToken cancellationToken)
+    {
+        var lastNumber = await DbContext.RestaurantOrders
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == businessId &&
+                x.OrderDateLocal == orderDateLocal)
+            .MaxAsync(x => (int?)x.DailyOrderNumber, cancellationToken);
+
+        return (lastNumber ?? 0) + 1;
+    }
+
+    private static DateOnly GetRestaurantOrderLocalDate(DateTime utcNow)
+    {
+        var utc = utcNow.Kind switch
+        {
+            DateTimeKind.Utc => utcNow,
+            DateTimeKind.Local => utcNow.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(utcNow, DateTimeKind.Utc)
+        };
+
+        var timeZone = GetRestaurantTimeZone();
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
+
+        return DateOnly.FromDateTime(local);
+    }
+
+    private static TimeZoneInfo GetRestaurantTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+        }
+        catch
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Central Europe Standard Time");
+        }
+    }
+
+    private static string FormatDisplayOrderNumber(int dailyOrderNumber)
+    {
+        return dailyOrderNumber <= 0
+            ? "-"
+            : $"#{dailyOrderNumber}";
     }
 
     private static DateTime? EnsureUtcOrNull(DateTime? value)

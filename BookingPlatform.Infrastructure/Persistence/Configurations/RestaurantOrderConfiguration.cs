@@ -12,6 +12,26 @@ public sealed class RestaurantOrderConfiguration : IEntityTypeConfiguration<Rest
 
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.OrderDateLocal)
+    .IsRequired();
+
+        builder.Property(x => x.DailyOrderNumber)
+            .IsRequired();
+
+        builder.HasIndex(x => new
+        {
+            x.BusinessId,
+            x.OrderDateLocal,
+            x.DailyOrderNumber
+        })
+        .IsUnique();
+
+        builder.HasIndex(x => new
+        {
+            x.BusinessId,
+            x.OrderDateLocal
+        });
+
         builder.Property(x => x.CustomerName)
             .HasMaxLength(200);
 
