@@ -6,6 +6,7 @@ using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Api.Services;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -17,8 +18,16 @@ namespace BookingPlatform.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class RestaurantTableOperationsController : ApiControllerBase
 {
-    public RestaurantTableOperationsController(BookingDbContext dbContext) : base(dbContext)
+    private const int TableShouldBeFreeAlarmLeadMinutes = 15;
+
+    private readonly ISystemAlarmService _systemAlarmService;
+
+    public RestaurantTableOperationsController(
+        BookingDbContext dbContext,
+        ISystemAlarmService systemAlarmService)
+        : base(dbContext)
     {
+        _systemAlarmService = systemAlarmService;
     }
 
     [HttpGet("active-sessions")]
@@ -183,6 +192,10 @@ public sealed class RestaurantTableOperationsController : ApiControllerBase
             .Include(x => x.TableResource)
             .FirstAsync(x => x.Id == entity.Id, cancellationToken);
 
+        await CreateTableShouldBeFreeAlarmForSessionIfNeededAsync(
+            entity,
+            cancellationToken);
+
         return Ok(ToDto(entity));
     }
 
@@ -275,6 +288,10 @@ public sealed class RestaurantTableOperationsController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        await CancelTableShouldBeFreeAlarmsForSessionAsync(
+            entity,
+            cancellationToken);
+
         return Ok(ToDto(entity));
     }
 
@@ -361,6 +378,10 @@ public sealed class RestaurantTableOperationsController : ApiControllerBase
             .Include(x => x.TableResource)
             .FirstAsync(x => x.Id == entity.Id, cancellationToken);
 
+        await CreateTableShouldBeFreeAlarmForSessionIfNeededAsync(
+            entity,
+            cancellationToken);
+
         return Ok(ToDto(entity));
     }
 
@@ -414,6 +435,10 @@ public sealed class RestaurantTableOperationsController : ApiControllerBase
         entity.UpdatedAtUtc = now;
 
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        await CancelTableShouldBeFreeAlarmsForSessionAsync(
+            entity,
+            cancellationToken);
 
         return Ok(ToDto(entity));
     }
@@ -572,10 +597,111 @@ public sealed class RestaurantTableOperationsController : ApiControllerBase
             return BadRequest("Zauzeće stola ne može da se obriše jer ima narudžbine. Možete ga osloboditi ili otkazati.");
         }
 
+        await CancelTableShouldBeFreeAlarmsForSessionAsync(
+            entity,
+            cancellationToken);
+
         DbContext.RestaurantTableSessions.Remove(entity);
         await DbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
+    }
+
+    private async Task CreateTableShouldBeFreeAlarmForSessionIfNeededAsync(
+    RestaurantTableSession session,
+    CancellationToken cancellationToken)
+    {
+        if (session.Status != RestaurantTableSessionStatus.Active ||
+            session.ReleasedAtUtc.HasValue)
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+
+        var nextReservation = await DbContext.RestaurantTableReservations
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == session.BusinessId &&
+                x.RestaurantAreaId == session.RestaurantAreaId &&
+                x.TableResourceId == session.TableResourceId &&
+                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                x.ReservationAtUtc > nowUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (nextReservation is null)
+            return;
+
+        var triggerAtUtc = nextReservation.ReservationAtUtc
+            .AddMinutes(-TableShouldBeFreeAlarmLeadMinutes);
+
+        if (triggerAtUtc < nowUtc)
+            triggerAtUtc = nowUtc;
+
+        var targetRestaurantOperationUnitId = await GetDefaultRestaurantOperationUnitIdAsync(
+            session.BusinessId,
+            cancellationToken);
+
+        var tableName = session.TableResource?.Name;
+
+        if (string.IsNullOrWhiteSpace(tableName))
+            tableName = $"Sto #{session.TableResourceId}";
+
+        await _systemAlarmService.CreateRestaurantTableShouldBeFreeAlarmAsync(
+            session.BusinessId,
+            nextReservation.Id,
+            session.Id,
+            session.TableResourceId,
+            tableName,
+            nextReservation.ReservationAtUtc,
+            nextReservation.PartySize,
+            triggerAtUtc,
+            targetRestaurantOperationUnitId,
+            cancellationToken);
+    }
+
+    private async Task CancelTableShouldBeFreeAlarmsForSessionAsync(
+    RestaurantTableSession session,
+    CancellationToken cancellationToken)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        var relatedReservations = await DbContext.RestaurantTableReservations
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == session.BusinessId &&
+                x.RestaurantAreaId == session.RestaurantAreaId &&
+                x.TableResourceId == session.TableResourceId &&
+                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                x.ReservationAtUtc > nowUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .Take(10)
+            .ToListAsync(cancellationToken);
+
+        foreach (var reservation in relatedReservations)
+        {
+            await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+                reservation.BusinessId,
+                reservation.Id,
+                cancellationToken);
+        }
+    }
+
+    private async Task<long?> GetDefaultRestaurantOperationUnitIdAsync(
+        long businessId,
+        CancellationToken cancellationToken)
+    {
+        return await DbContext.RestaurantOperationUnits
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == businessId &&
+                x.IsActive &&
+                x.UnitType == RestaurantOperationUnitType.DiningRoom)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.Id)
+            .Select(x => (long?)x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private static RestaurantTableSessionDto ToDto(RestaurantTableSession entity)

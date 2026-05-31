@@ -25,6 +25,8 @@ public sealed class RestaurantMenuItem : AuditableEntity
 
     public bool SendToKitchen { get; set; } = true;
 
+    public int PreparationTimeMin { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public int DisplayOrder { get; set; }

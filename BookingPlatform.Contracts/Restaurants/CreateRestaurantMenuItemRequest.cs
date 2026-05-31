@@ -18,5 +18,7 @@ public sealed class CreateRestaurantMenuItemRequest
 
     public bool SendToKitchen { get; set; } = true;
 
+    public int PreparationTimeMin { get; set; }
+
     public int DisplayOrder { get; set; }
 }

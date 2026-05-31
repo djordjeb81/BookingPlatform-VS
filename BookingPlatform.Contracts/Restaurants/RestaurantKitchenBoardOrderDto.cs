@@ -41,6 +41,16 @@ public sealed class RestaurantKitchenBoardOrderDto
 
     public DateTime? KitchenRejectedAtUtc { get; set; }
 
+    public int MaxPreparationTimeMin { get; set; }
+
+    public int PreparationReminderBufferMin { get; set; }
+
+    public DateTime? PreparationShouldStartAtUtc { get; set; }
+
+    public bool ShouldStartPreparingNow { get; set; }
+
+    public int? MinutesUntilPreparationStart { get; set; }
+
     public string? KitchenRejectReason { get; set; }
 
     public string? KitchenRejectNote { get; set; }
@@ -50,6 +60,8 @@ public sealed class RestaurantKitchenBoardOrderDto
     public string? CustomerPhone { get; set; }
 
     public DateTime? RequestedPickupAtUtc { get; set; }
+
+    public bool IsScheduledOrder { get; set; }
 
     public string? DeliveryAddress { get; set; }
 

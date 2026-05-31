@@ -6,6 +6,8 @@ using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Api.Services;
+using BookingPlatform.Domain.SystemAlarms;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -17,8 +19,16 @@ namespace BookingPlatform.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class RestaurantTableReservationsController : ApiControllerBase
 {
-    public RestaurantTableReservationsController(BookingDbContext dbContext) : base(dbContext)
+    private const int TableShouldBeFreeAlarmLeadMinutes = 15;
+
+    private readonly ISystemAlarmService _systemAlarmService;
+
+    public RestaurantTableReservationsController(
+        BookingDbContext dbContext,
+        ISystemAlarmService systemAlarmService)
+        : base(dbContext)
     {
+        _systemAlarmService = systemAlarmService;
     }
 
     [HttpGet]
@@ -435,6 +445,13 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+            entity.BusinessId,
+            entity.Id,
+            cancellationToken);
+
+        await CreateTableShouldBeFreeAlarmIfNeededAsync(entity, cancellationToken);
+
         var dtoEntity = await DbContext.RestaurantTableReservations
             .AsNoTracking()
             .Include(x => x.TableResource)
@@ -505,6 +522,13 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+            entity.BusinessId,
+            entity.Id,
+            cancellationToken);
+
+        await CreateTableShouldBeFreeAlarmIfNeededAsync(entity, cancellationToken);
 
         var dtoEntity = await DbContext.RestaurantTableReservations
             .AsNoTracking()
@@ -587,7 +611,14 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(ToDto(entity));
+        await CreateTableShouldBeFreeAlarmIfNeededAsync(entity, cancellationToken);
+
+        var dtoEntity = await DbContext.RestaurantTableReservations
+            .AsNoTracking()
+            .Include(x => x.TableResource)
+            .FirstAsync(x => x.Id == entity.Id, cancellationToken);
+
+        return Ok(ToDto(dtoEntity));
     }
 
     [HttpPost("{reservationId:long}/reject")]
@@ -616,6 +647,10 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         entity.InternalNote = AppendText(entity.InternalNote, request.InternalNote, 1000);
 
         await DbContext.SaveChangesAsync(cancellationToken);
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+    entity.BusinessId,
+    entity.Id,
+    cancellationToken);
 
         return Ok(ToDto(entity));
     }
@@ -650,8 +685,12 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         entity.Note = AppendText(entity.Note, request.Note, 1000);
         entity.InternalNote = AppendText(entity.InternalNote, request.InternalNote, 1000);
         entity.UpdatedAtUtc = now;
-
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+            entity.BusinessId,
+            entity.Id,
+            cancellationToken);
 
         return Ok(ToDto(entity));
     }
@@ -679,6 +718,10 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         await DbContext.SaveChangesAsync(cancellationToken);
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+    entity.BusinessId,
+    entity.Id,
+    cancellationToken);
 
         return Ok(ToDto(entity));
     }
@@ -781,6 +824,11 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+    entity.BusinessId,
+    entity.Id,
+    cancellationToken);
 
         var dtoEntity = await DbContext.RestaurantTableReservations
             .AsNoTracking()
@@ -888,12 +936,89 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+    entity.BusinessId,
+    entity.Id,
+    cancellationToken);
+
         var dtoSession = await DbContext.RestaurantTableSessions
             .AsNoTracking()
             .Include(x => x.TableResource)
             .FirstAsync(x => x.Id == session.Id, cancellationToken);
 
         return Ok(ToSessionDto(dtoSession));
+    }
+
+    private async Task CreateTableShouldBeFreeAlarmIfNeededAsync(
+    RestaurantTableReservation reservation,
+    CancellationToken cancellationToken)
+    {
+        if (reservation.Status != RestaurantTableReservationStatus.Confirmed)
+            return;
+
+        if (!reservation.TableResourceId.HasValue)
+            return;
+
+        var reservationAtUtc = EnsureUtc(reservation.ReservationAtUtc);
+
+        if (reservationAtUtc <= DateTime.UtcNow)
+            return;
+
+        var activeSession = await DbContext.RestaurantTableSessions
+            .AsNoTracking()
+            .Include(x => x.TableResource)
+            .Where(x =>
+                x.BusinessId == reservation.BusinessId &&
+                x.RestaurantAreaId == reservation.RestaurantAreaId &&
+                x.TableResourceId == reservation.TableResourceId.Value &&
+                x.Status == RestaurantTableSessionStatus.Active &&
+                x.ReleasedAtUtc == null)
+            .OrderByDescending(x => x.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (activeSession is null)
+            return;
+
+        var triggerAtUtc = reservationAtUtc.AddMinutes(-TableShouldBeFreeAlarmLeadMinutes);
+
+        if (triggerAtUtc < DateTime.UtcNow)
+            triggerAtUtc = DateTime.UtcNow;
+
+        var targetRestaurantOperationUnitId = await GetDefaultRestaurantOperationUnitIdAsync(
+            reservation.BusinessId,
+            cancellationToken);
+
+        var tableName = reservation.TableResource?.Name
+            ?? activeSession.TableResource?.Name
+            ?? $"Sto #{reservation.TableResourceId.Value}";
+
+        await _systemAlarmService.CreateRestaurantTableShouldBeFreeAlarmAsync(
+            reservation.BusinessId,
+            reservation.Id,
+            activeSession.Id,
+            reservation.TableResourceId.Value,
+            tableName,
+            reservationAtUtc,
+            reservation.PartySize,
+            triggerAtUtc,
+            targetRestaurantOperationUnitId,
+            cancellationToken);
+    }
+
+    private async Task<long?> GetDefaultRestaurantOperationUnitIdAsync(
+        long businessId,
+        CancellationToken cancellationToken)
+    {
+        return await DbContext.RestaurantOperationUnits
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == businessId &&
+                x.IsActive &&
+                x.UnitType == RestaurantOperationUnitType.DiningRoom)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.Id)
+            .Select(x => (long?)x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task<ActionResult?> ValidateAreaReservationConflictForTableReservationAsync(

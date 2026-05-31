@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BookingPlatform.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using BookingPlatform.Api.Services;
+
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -21,14 +23,18 @@ namespace BookingPlatform.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class RestaurantOrdersController : ApiControllerBase
 {
+    private const int ScheduledOrderMinimumLeadTimeMin = 5;
     private readonly IHubContext<BusinessActivityHub> _businessActivityHub;
+    private readonly ISystemAlarmService _systemAlarmService;
 
     public RestaurantOrdersController(
         BookingDbContext dbContext,
-        IHubContext<BusinessActivityHub> businessActivityHub)
+        IHubContext<BusinessActivityHub> businessActivityHub,
+        ISystemAlarmService systemAlarmService)
         : base(dbContext)
     {
         _businessActivityHub = businessActivityHub;
+        _systemAlarmService = systemAlarmService;
     }
 
     [HttpGet]
@@ -148,6 +154,29 @@ x.Status == RestaurantOrderStatus.Served ||
             .Take(200)
             .ToListAsync(cancellationToken);
 
+        var settings = await DbContext.RestaurantSettings
+    .AsNoTracking()
+    .FirstOrDefaultAsync(x => x.BusinessId == businessId, cancellationToken);
+
+        var preparationReminderBufferMin = settings?.PreparationReminderBufferMin ?? 10;
+        var nowUtc = DateTime.UtcNow;
+
+        var menuItemIds = orders
+            .SelectMany(x => x.Items)
+            .Select(x => x.MenuItemId)
+            .Distinct()
+            .ToList();
+
+        var preparationByMenuItemId = menuItemIds.Count == 0
+            ? new Dictionary<long, int>()
+            : await DbContext.RestaurantMenuItems
+                .AsNoTracking()
+                .Where(x => menuItemIds.Contains(x.Id))
+                .ToDictionaryAsync(
+                    x => x.Id,
+                    x => x.PreparationTimeMin,
+                    cancellationToken);
+
         var tableResourceIds = orders
     .Where(x => x.TableResourceId.HasValue)
     .Select(x => x.TableResourceId!.Value)
@@ -170,7 +199,39 @@ x.Status == RestaurantOrderStatus.Served ||
             .Where(order =>
                 order.OrderSource == RestaurantOrderSource.KitchenDesk ||
                 order.Items.Any(item => item.SendToKitchenSnapshot))
-            .Select(order => new RestaurantKitchenBoardOrderDto
+            .Select(order =>
+            {
+            var kitchenItems = order.Items
+        .Where(item =>
+            order.OrderSource == RestaurantOrderSource.KitchenDesk ||
+            item.SendToKitchenSnapshot)
+        .ToList();
+
+            var maxPreparationTimeMin = kitchenItems
+        .Select(item =>
+            preparationByMenuItemId.TryGetValue(item.MenuItemId, out var preparationTimeMin)
+                ? preparationTimeMin
+                : 0)
+        .DefaultIfEmpty(0)
+        .Max();
+
+            DateTime? preparationShouldStartAtUtc = null;
+            int? minutesUntilPreparationStart = null;
+            var shouldStartPreparingNow = false;
+
+            if (order.IsScheduledOrder && order.RequestedPickupAtUtc.HasValue)
+            {
+                preparationShouldStartAtUtc = order.RequestedPickupAtUtc.Value
+            .AddMinutes(-maxPreparationTimeMin)
+            .AddMinutes(-preparationReminderBufferMin);
+
+                minutesUntilPreparationStart = (int)Math.Ceiling(
+            (preparationShouldStartAtUtc.Value - nowUtc).TotalMinutes);
+
+                shouldStartPreparingNow = preparationShouldStartAtUtc.Value <= nowUtc;
+            }
+
+            return new RestaurantKitchenBoardOrderDto
             {
                 OrderId = order.Id,
                 OrderDateLocal = order.OrderDateLocal,
@@ -195,11 +256,17 @@ x.Status == RestaurantOrderStatus.Served ||
                 KitchenAcceptedAtUtc = order.KitchenAcceptedAtUtc,
                 KitchenAcceptLaterMinutes = order.KitchenAcceptLaterMinutes,
                 KitchenRejectedAtUtc = order.KitchenRejectedAtUtc,
+                MaxPreparationTimeMin = maxPreparationTimeMin,
+                PreparationReminderBufferMin = preparationReminderBufferMin,
+                PreparationShouldStartAtUtc = preparationShouldStartAtUtc,
+                ShouldStartPreparingNow = shouldStartPreparingNow,
+                MinutesUntilPreparationStart = minutesUntilPreparationStart,
                 KitchenRejectReason = order.KitchenRejectReason,
                 KitchenRejectNote = order.KitchenRejectNote,
                 CustomerName = order.CustomerName,
                 CustomerPhone = order.CustomerPhone,
                 RequestedPickupAtUtc = order.RequestedPickupAtUtc,
+                IsScheduledOrder = order.IsScheduledOrder,
                 DeliveryAddress = order.DeliveryAddress,
                 DeliveryNote = order.DeliveryNote,
                 Note = order.Note,
@@ -210,28 +277,28 @@ x.Status == RestaurantOrderStatus.Served ||
 
 
                 Items = order.Items
-    .Where(x =>
-        order.OrderSource == RestaurantOrderSource.KitchenDesk ||
-        x.SendToKitchenSnapshot)
-    .OrderBy(x => x.Id)
-    .Select(item => new RestaurantOrderItemDto
-    {
-        Id = item.Id,
-        OrderId = item.OrderId,
-        OrderGuestId = item.OrderGuestId,
-        OrderGuestName = order.Guests
-    .FirstOrDefault(g => g.Id == item.OrderGuestId)
-    ?.Name,
-        MenuItemId = item.MenuItemId,
-        MenuItemNameSnapshot = item.MenuItemNameSnapshot,
-        UnitPriceSnapshot = item.UnitPriceSnapshot,
-        Quantity = item.Quantity,
-        LineSubtotal = item.LineSubtotal,
-        SendToKitchenSnapshot = item.SendToKitchenSnapshot,
-        IsReady = item.IsReady,
-        ReadyAtUtc = item.ReadyAtUtc,
-        Note = item.Note,
-        Options = item.Options
+                    .Where(x =>
+                        order.OrderSource == RestaurantOrderSource.KitchenDesk ||
+                        x.SendToKitchenSnapshot)
+                    .OrderBy(x => x.Id)
+                    .Select(item => new RestaurantOrderItemDto
+                    {
+                        Id = item.Id,
+                        OrderId = item.OrderId,
+                        OrderGuestId = item.OrderGuestId,
+                        OrderGuestName = order.Guests
+                            .FirstOrDefault(g => g.Id == item.OrderGuestId)
+                            ?.Name,
+                        MenuItemId = item.MenuItemId,
+                        MenuItemNameSnapshot = item.MenuItemNameSnapshot,
+                        UnitPriceSnapshot = item.UnitPriceSnapshot,
+                        Quantity = item.Quantity,
+                        LineSubtotal = item.LineSubtotal,
+                        SendToKitchenSnapshot = item.SendToKitchenSnapshot,
+                        IsReady = item.IsReady,
+                        ReadyAtUtc = item.ReadyAtUtc,
+                        Note = item.Note,
+                        Options = item.Options
                             .OrderBy(x => x.Id)
                             .Select(option => new RestaurantOrderItemOptionDto
                             {
@@ -247,8 +314,9 @@ x.Status == RestaurantOrderStatus.Served ||
                             .ToList()
                     })
                     .ToList()
+            };
             })
-            .ToList();
+        .ToList();
 
         return Ok(result);
     }
@@ -635,12 +703,11 @@ x.Status == RestaurantOrderStatus.Served ||
 
     [HttpPost]
     public async Task<ActionResult<RestaurantOrderDto>> Create(
-        [FromBody] CreateRestaurantOrderRequest request,
-        CancellationToken cancellationToken)
+     [FromBody] CreateRestaurantOrderRequest request,
+     CancellationToken cancellationToken)
     {
         if (request.BusinessId <= 0)
             return BadRequest("businessId je obavezan.");
-
 
         if (!Enum.IsDefined(typeof(RestaurantOrderType), request.OrderType))
             return BadRequest("Nepoznat tip narudžbine.");
@@ -649,17 +716,7 @@ x.Status == RestaurantOrderStatus.Served ||
             return BadRequest("Izvor porudžbine nije ispravan.");
 
         var orderSource = (RestaurantOrderSource)request.OrderSource;
-
         var orderType = (RestaurantOrderType)request.OrderType;
-
-        if (orderType == RestaurantOrderType.DineIn && !request.TableSessionId.HasValue)
-            return BadRequest("Za narudžbinu u lokalu potrebno je izabrati zauzeće stola.");
-
-        if (orderType == RestaurantOrderType.Takeaway && !request.RequestedPickupAtUtc.HasValue)
-            return BadRequest("Za narudžbinu za poneti unesite vreme preuzimanja.");
-
-        if (orderType == RestaurantOrderType.Delivery && string.IsNullOrWhiteSpace(request.DeliveryAddress))
-            return BadRequest("Za dostavu unesite adresu.");
 
         var accessResult = await EnsureBusinessWriteAccessAsync(request.BusinessId, cancellationToken);
         if (accessResult is not null)
@@ -672,7 +729,88 @@ x.Status == RestaurantOrderStatus.Served ||
         if (!businessExists)
             return BadRequest("Izabrana radnja ne postoji ili nije aktivna.");
 
+        var settings = await DbContext.RestaurantSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.BusinessId == request.BusinessId, cancellationToken);
 
+        if (settings is null)
+        {
+            settings = new RestaurantSettings
+            {
+                BusinessId = request.BusinessId,
+                PreparationReminderBufferMin = 10,
+                ScheduledOrderMinLeadTimeMin = 30,
+                ScheduledOrderMaxDaysAhead = 7,
+                IsScheduledOrderingEnabled = true,
+                IsDeliveryEnabled = true,
+                IsDeliveryLocationRequired = false
+            };
+        }
+
+        if (orderType == RestaurantOrderType.DineIn && !request.TableSessionId.HasValue)
+            return BadRequest("Za narudžbinu u lokalu potrebno je izabrati zauzeće stola.");
+
+        if (orderType == RestaurantOrderType.Takeaway && !request.RequestedPickupAtUtc.HasValue)
+            return BadRequest("Za narudžbinu za poneti unesite vreme preuzimanja.");
+
+        if (orderType == RestaurantOrderType.Delivery)
+        {
+            if (!settings.IsDeliveryEnabled)
+                return BadRequest("Dostava trenutno nije uključena za ovaj restoran.");
+
+            if (string.IsNullOrWhiteSpace(request.DeliveryAddress))
+                return BadRequest("Za dostavu unesite adresu.");
+
+            if (settings.IsDeliveryLocationRequired &&
+                (!request.DeliveryLatitude.HasValue || !request.DeliveryLongitude.HasValue))
+            {
+                return BadRequest("Za dostavu je obavezno poslati lokaciju.");
+            }
+        }
+
+        if (request.IsScheduledOrder)
+        {
+            if (!settings.IsScheduledOrderingEnabled)
+                return BadRequest("Zakazane porudžbine trenutno nisu uključene za ovaj restoran.");
+
+            if (!request.RequestedPickupAtUtc.HasValue)
+                return BadRequest("Za zakazanu porudžbinu izaberite datum i vreme.");
+
+            var requestedPickupUtc = EnsureUtc(request.RequestedPickupAtUtc.Value);
+            var nowUtc = DateTime.UtcNow;
+
+            if (requestedPickupUtc < nowUtc.AddMinutes(ScheduledOrderMinimumLeadTimeMin))
+            {
+                return BadRequest(
+                    $"Zakazana porudžbina mora biti najmanje {ScheduledOrderMinimumLeadTimeMin} minuta unapred.");
+            }
+
+            if (settings.ScheduledOrderMaxDaysAhead > 0 &&
+                requestedPickupUtc > nowUtc.AddDays(settings.ScheduledOrderMaxDaysAhead))
+            {
+                return BadRequest(
+                    $"Zakazana porudžbina može najviše {settings.ScheduledOrderMaxDaysAhead} dana unapred.");
+            }
+        }
+
+        RestaurantDeliveryZone? deliveryZone = null;
+
+        if (orderType == RestaurantOrderType.Delivery)
+        {
+            if (!request.DeliveryZoneId.HasValue || request.DeliveryZoneId.Value <= 0)
+                return BadRequest("Za dostavu izaberite zonu dostave.");
+
+            deliveryZone = await DbContext.RestaurantDeliveryZones
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x =>
+                    x.Id == request.DeliveryZoneId.Value &&
+                    x.BusinessId == request.BusinessId &&
+                    x.IsActive,
+                    cancellationToken);
+
+            if (deliveryZone is null)
+                return BadRequest("Izabrana zona dostave ne postoji ili nije aktivna.");
+        }
 
         if (request.RestaurantAreaId.HasValue)
         {
@@ -739,7 +877,14 @@ x.Status == RestaurantOrderStatus.Served ||
             OrderType = orderType,
             OrderSource = orderSource,
             RequestedPickupAtUtc = EnsureUtcOrNull(request.RequestedPickupAtUtc),
+            IsScheduledOrder = request.IsScheduledOrder,
             DeliveryAddress = NormalizeText(request.DeliveryAddress, 500),
+            DeliveryZoneId = deliveryZone?.Id,
+            DeliveryLatitude = request.DeliveryLatitude,
+            DeliveryLongitude = request.DeliveryLongitude,
+            DeliveryZoneNameSnapshot = deliveryZone?.Name,
+            DeliveryFeeAmount = deliveryZone?.DeliveryFeeAmount ?? 0m,
+            DeliveryMinimumOrderAmountSnapshot = deliveryZone?.MinimumOrderAmount ?? 0m,
             DeliveryNote = NormalizeText(request.DeliveryNote, 1000),
             CustomerName = NormalizeText(request.CustomerName, 200),
             CustomerPhone = NormalizeText(request.CustomerPhone, 50),
@@ -1326,8 +1471,13 @@ x.Status == RestaurantOrderStatus.Served ||
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        await _systemAlarmService.CancelRelatedRestaurantOrderAlarmsAsync(
+            order.BusinessId,
+            order.Id,
+            cancellationToken);
+
         await NotifyRestaurantOrderChangedAsync(
-            order,
+                    order,
             "RestaurantOrderKitchenRejected",
             cancellationToken);
 
@@ -1377,7 +1527,7 @@ x.Status == RestaurantOrderStatus.Served ||
         await DbContext.SaveChangesAsync(cancellationToken);
 
         await NotifyRestaurantOrderChangedAsync(
-            order,
+                    order,
             "RestaurantOrderWaitingAcceptedByCustomer",
             cancellationToken);
 
@@ -1428,6 +1578,11 @@ x.Status == RestaurantOrderStatus.Served ||
         MarkOrderWaitingProposalMessagesCompleted(order.Id, now);
 
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        await _systemAlarmService.CancelRelatedRestaurantOrderAlarmsAsync(
+    order.BusinessId,
+    order.Id,
+    cancellationToken);
 
         await NotifyRestaurantOrderChangedAsync(
             order,
@@ -1566,6 +1721,48 @@ x.Status == RestaurantOrderStatus.Served ||
         if (order.Items.Count == 0)
             return BadRequest("Narudžbina mora imati bar jednu stavku.");
 
+        RecalculateOrderTotals(order);
+
+        if (order.OrderType == RestaurantOrderType.Delivery)
+        {
+            if (order.DeliveryZoneId is null || order.DeliveryZoneId <= 0)
+                return BadRequest("Za dostavu nije izabrana zona dostave.");
+
+            if (string.IsNullOrWhiteSpace(order.DeliveryAddress))
+                return BadRequest("Za dostavu unesite adresu.");
+
+            if (order.DeliveryMinimumOrderAmountSnapshot > 0 &&
+                order.SubtotalAmount < order.DeliveryMinimumOrderAmountSnapshot)
+            {
+                var missingAmount = order.DeliveryMinimumOrderAmountSnapshot - order.SubtotalAmount;
+
+                return BadRequest(
+                    $"Minimalna porudžbina za dostavu u zoni {order.DeliveryZoneNameSnapshot} je {order.DeliveryMinimumOrderAmountSnapshot:0.##} {order.Currency}. " +
+                    $"Dodajte još {missingAmount:0.##} {order.Currency} ili izaberite drugi način preuzimanja.");
+            }
+        }
+
+        if (order.IsScheduledOrder)
+        {
+            if (!order.RequestedPickupAtUtc.HasValue)
+                return BadRequest("Za zakazanu porudžbinu izaberite datum i vreme.");
+
+            var requestedPickupUtc = EnsureUtc(order.RequestedPickupAtUtc.Value);
+            var maxPreparationTimeMin = await GetOrderMaxPreparationTimeMinAsync(order, cancellationToken);
+
+            var earliestReadyUtc = DateTime.UtcNow.AddMinutes(maxPreparationTimeMin + 1);
+
+            if (requestedPickupUtc < earliestReadyUtc)
+            {
+                var earliestReadyLocal = earliestReadyUtc.ToLocalTime();
+
+                return BadRequest(
+                    $"Ne može za izabrano vreme. " +
+                    $"Najduža priprema traje {maxPreparationTimeMin} min. " +
+                    $"Može najbrže u {earliestReadyLocal:HH:mm}.");
+            }
+        }
+
         var now = DateTime.UtcNow;
 
         order.Status = RestaurantOrderStatus.Submitted;
@@ -1585,12 +1782,122 @@ x.Status == RestaurantOrderStatus.Served ||
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        await CreatePreparationStartAlarmIfNeededAsync(order, cancellationToken);
+
         await NotifyRestaurantOrderChangedAsync(
             order,
             "RestaurantOrderSubmitted",
             cancellationToken);
 
         return Ok(ToDto(order));
+    }
+
+    private async Task CreatePreparationStartAlarmIfNeededAsync(
+    RestaurantOrder order,
+    CancellationToken cancellationToken)
+    {
+        if (!order.IsScheduledOrder)
+            return;
+
+        if (!order.RequestedPickupAtUtc.HasValue)
+            return;
+
+        var kitchenItems = order.Items
+            .Where(item =>
+                order.OrderSource == RestaurantOrderSource.KitchenDesk ||
+                item.SendToKitchenSnapshot)
+            .ToList();
+
+        if (kitchenItems.Count == 0)
+            return;
+
+        var menuItemIds = kitchenItems
+            .Select(x => x.MenuItemId)
+            .Distinct()
+            .ToList();
+
+        var preparationByMenuItemId = await DbContext.RestaurantMenuItems
+            .AsNoTracking()
+            .Where(x => menuItemIds.Contains(x.Id))
+            .ToDictionaryAsync(
+                x => x.Id,
+                x => x.PreparationTimeMin,
+                cancellationToken);
+
+        var maxPreparationTimeMin = kitchenItems
+            .Select(item =>
+                preparationByMenuItemId.TryGetValue(item.MenuItemId, out var preparationTimeMin)
+                    ? preparationTimeMin
+                    : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        var settings = await DbContext.RestaurantSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.BusinessId == order.BusinessId, cancellationToken);
+
+        var preparationReminderBufferMin = settings?.PreparationReminderBufferMin ?? 10;
+
+        var requestedPickupAtUtc = EnsureUtc(order.RequestedPickupAtUtc.Value);
+
+        var triggerAtUtc = requestedPickupAtUtc
+            .AddMinutes(-maxPreparationTimeMin)
+            .AddMinutes(-preparationReminderBufferMin);
+
+        var nowUtc = DateTime.UtcNow;
+
+        if (triggerAtUtc < nowUtc)
+            triggerAtUtc = nowUtc;
+
+        var targetKitchenOperationUnitId = await GetDefaultOperationUnitIdAsync(
+            order.BusinessId,
+            RestaurantOperationUnitType.Kitchen,
+            cancellationToken);
+
+        await _systemAlarmService.CreateRestaurantPreparationStartAlarmAsync(
+            order.BusinessId,
+            order.Id,
+            triggerAtUtc,
+            FormatDisplayOrderNumber(order.DailyOrderNumber),
+            targetKitchenOperationUnitId,
+            cancellationToken);
+    }
+
+    private async Task<int> GetOrderMaxPreparationTimeMinAsync(
+    RestaurantOrder order,
+    CancellationToken cancellationToken)
+    {
+        var kitchenItems = order.Items
+            .Where(item =>
+                order.OrderSource == RestaurantOrderSource.KitchenDesk ||
+                item.SendToKitchenSnapshot)
+            .ToList();
+
+        if (kitchenItems.Count == 0)
+            return 0;
+
+        var menuItemIds = kitchenItems
+            .Select(x => x.MenuItemId)
+            .Distinct()
+            .ToList();
+
+        var preparationByMenuItemId = await DbContext.RestaurantMenuItems
+            .AsNoTracking()
+            .Where(x => menuItemIds.Contains(x.Id))
+            .ToDictionaryAsync(
+                x => x.Id,
+                x => x.PreparationTimeMin,
+                cancellationToken);
+
+        var maxPreparationTimeMin = kitchenItems
+            .Select(item =>
+                preparationByMenuItemId.TryGetValue(item.MenuItemId, out var preparationTimeMin)
+                    ? preparationTimeMin
+                    : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return Math.Max(0, maxPreparationTimeMin);
     }
 
     [HttpPost("{orderId:long}/status")]
@@ -1645,6 +1952,19 @@ x.Status == RestaurantOrderStatus.Served ||
 
         await DbContext.SaveChangesAsync(cancellationToken);
 
+        if (newStatus == RestaurantOrderStatus.Cancelled)
+        {
+            await _systemAlarmService.CancelRelatedRestaurantOrderAlarmsAsync(
+                order.BusinessId,
+                order.Id,
+                cancellationToken);
+        }
+
+        await NotifyRestaurantOrderChangedAsync(
+            order,
+            "RestaurantOrderStatusChanged",
+            cancellationToken);
+
         return Ok(ToDto(order));
     }
 
@@ -1665,6 +1985,11 @@ x.Status == RestaurantOrderStatus.Served ||
         if (order.Status != RestaurantOrderStatus.Draft)
             return BadRequest("Samo nacrt narudžbine može da se obriše. Poslate narudžbine ostaju kao istorija.");
 
+        await _systemAlarmService.CancelRelatedRestaurantOrderAlarmsAsync(
+            order.BusinessId,
+            order.Id,
+            cancellationToken);
+
         DbContext.RestaurantOrders.Remove(order);
         await DbContext.SaveChangesAsync(cancellationToken);
 
@@ -1672,10 +1997,10 @@ x.Status == RestaurantOrderStatus.Served ||
     }
 
     private async Task<ActionResult<RestaurantOrderDto>> ChangeOrderStatusAsync(
-    long orderId,
-    RestaurantOrderStatus newStatus,
-    string? note,
-    CancellationToken cancellationToken)
+        long orderId,
+        RestaurantOrderStatus newStatus,
+        string? note,
+        CancellationToken cancellationToken)
     {
         var order = await LoadOrderAsync(orderId, asTracking: true, cancellationToken);
 
@@ -1699,7 +2024,7 @@ x.Status == RestaurantOrderStatus.Served ||
         }
 
         if (newStatus == RestaurantOrderStatus.Preparing &&
-    order.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.None)
+            order.KitchenDecisionStatus == RestaurantKitchenDecisionStatus.None)
         {
             return BadRequest("Kuhinja prvo mora da prihvati porudžbinu.");
         }
@@ -1779,6 +2104,17 @@ x.Status == RestaurantOrderStatus.Served ||
             cancellationToken);
 
         await DbContext.SaveChangesAsync(cancellationToken);
+
+        if (newStatus == RestaurantOrderStatus.Preparing ||
+            newStatus == RestaurantOrderStatus.Ready ||
+            newStatus == RestaurantOrderStatus.Served ||
+            newStatus == RestaurantOrderStatus.Cancelled)
+        {
+            await _systemAlarmService.CancelRelatedRestaurantOrderAlarmsAsync(
+                order.BusinessId,
+                order.Id,
+                cancellationToken);
+        }
 
         var activityType = newStatus switch
         {
@@ -2067,7 +2403,12 @@ new
     private static void RecalculateOrderTotals(RestaurantOrder order)
     {
         order.SubtotalAmount = order.Items.Sum(x => x.LineSubtotal);
-        order.TotalAmount = order.SubtotalAmount;
+
+        var deliveryFee = order.OrderType == RestaurantOrderType.Delivery
+            ? order.DeliveryFeeAmount
+            : 0m;
+
+        order.TotalAmount = order.SubtotalAmount + deliveryFee;
 
         var firstItem = order.Items.FirstOrDefault();
         if (firstItem is not null)
@@ -2162,8 +2503,15 @@ new
             OrderSource = (int)entity.OrderSource,
             OrderSourceText = GetOrderSourceText(entity.OrderSource),
             RequestedPickupAtUtc = entity.RequestedPickupAtUtc,
+            IsScheduledOrder = entity.IsScheduledOrder,
             DeliveryAddress = entity.DeliveryAddress,
             DeliveryNote = entity.DeliveryNote,
+            DeliveryLatitude = entity.DeliveryLatitude,
+            DeliveryLongitude = entity.DeliveryLongitude,
+            DeliveryZoneId = entity.DeliveryZoneId,
+            DeliveryZoneNameSnapshot = entity.DeliveryZoneNameSnapshot,
+            DeliveryFeeAmount = entity.DeliveryFeeAmount,
+            DeliveryMinimumOrderAmountSnapshot = entity.DeliveryMinimumOrderAmountSnapshot,
             CustomerName = entity.CustomerName,
             CustomerPhone = entity.CustomerPhone,
             Note = entity.Note,

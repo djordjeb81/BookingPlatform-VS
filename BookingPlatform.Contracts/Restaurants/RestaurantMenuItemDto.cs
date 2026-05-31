@@ -22,6 +22,8 @@ public sealed class RestaurantMenuItemDto
 
     public bool SendToKitchen { get; set; }
 
+    public int PreparationTimeMin { get; set; }
+
     public bool IsActive { get; set; }
 
     public int DisplayOrder { get; set; }

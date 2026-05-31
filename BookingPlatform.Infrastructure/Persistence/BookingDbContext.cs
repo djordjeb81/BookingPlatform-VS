@@ -11,6 +11,7 @@ using BookingPlatform.Domain.Customers;
 using BookingPlatform.Domain.Chat;
 using BookingPlatform.Domain.Push;
 using BookingPlatform.Domain.Restaurants;
+using BookingPlatform.Domain.SystemAlarms;
 
 namespace BookingPlatform.Infrastructure.Persistence;
 
@@ -51,6 +52,7 @@ public sealed class BookingDbContext : DbContext
     public DbSet<ChatConversation> ChatConversations => Set<ChatConversation>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
+    public DbSet<SystemAlarmTrigger> SystemAlarmTriggers => Set<SystemAlarmTrigger>();
     public DbSet<ResourceGroup> ResourceGroups => Set<ResourceGroup>();
     public DbSet<RestaurantArea> RestaurantAreas => Set<RestaurantArea>();
     public DbSet<RestaurantLayoutElement> RestaurantLayoutElements => Set<RestaurantLayoutElement>();
@@ -64,7 +66,7 @@ public sealed class BookingDbContext : DbContext
     public DbSet<RestaurantOrderMessageRecipient> RestaurantOrderMessageRecipients => Set<RestaurantOrderMessageRecipient>();
     public DbSet<RestaurantOrderItem> RestaurantOrderItems => Set<RestaurantOrderItem>();
     public DbSet<RestaurantOperationUnit> RestaurantOperationUnits => Set<RestaurantOperationUnit>();
-
+    public DbSet<RestaurantSettings> RestaurantSettings => Set<RestaurantSettings>();
     public DbSet<RestaurantOperationUnitWorkingHour> RestaurantOperationUnitWorkingHours => Set<RestaurantOperationUnitWorkingHour>();
     public DbSet<RestaurantOrderItemOption> RestaurantOrderItemOptions => Set<RestaurantOrderItemOption>();
     public DbSet<RestaurantPayment> RestaurantPayments => Set<RestaurantPayment>();
@@ -72,7 +74,7 @@ public sealed class BookingDbContext : DbContext
     public DbSet<RestaurantAreaReservation> RestaurantAreaReservations => Set<RestaurantAreaReservation>();
     public DbSet<RestaurantOrderGuest> RestaurantOrderGuests => Set<RestaurantOrderGuest>();
     public DbSet<RestaurantAddonGroup> RestaurantAddonGroups => Set<RestaurantAddonGroup>();
-
+    public DbSet<RestaurantDeliveryZone> RestaurantDeliveryZones => Set<RestaurantDeliveryZone>();
     public DbSet<RestaurantAddon> RestaurantAddons => Set<RestaurantAddon>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -85,6 +87,39 @@ public sealed class BookingDbContext : DbContext
         {
             entity.HasIndex(x => new { x.ServiceStepId, x.ResourceId })
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<RestaurantSettings>(entity =>
+        {
+            entity.ToTable("restaurant_settings");
+
+            entity.HasKey(x => x.Id);
+
+            entity.HasIndex(x => x.BusinessId)
+                .IsUnique();
+
+            entity.Property(x => x.PreparationReminderBufferMin)
+                .HasDefaultValue(10);
+
+            entity.Property(x => x.ScheduledOrderMinLeadTimeMin)
+                .HasDefaultValue(30);
+
+            entity.Property(x => x.ScheduledOrderMaxDaysAhead)
+                .HasDefaultValue(7);
+
+            entity.Property(x => x.IsScheduledOrderingEnabled)
+                .HasDefaultValue(true);
+
+            entity.Property(x => x.IsDeliveryEnabled)
+                .HasDefaultValue(true);
+
+            entity.Property(x => x.IsDeliveryLocationRequired)
+                .HasDefaultValue(false);
+
+            entity.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<UserPushToken>(entity =>
@@ -278,6 +313,44 @@ public sealed class BookingDbContext : DbContext
             entity.Property(x => x.OrderSource)
                 .HasConversion<int>()
                 .IsRequired();
+        });
+
+        modelBuilder.Entity<RestaurantDeliveryZone>(entity =>
+        {
+            entity.ToTable("restaurant_delivery_zones");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .HasMaxLength(160)
+                .IsRequired();
+
+            entity.Property(x => x.Description)
+                .HasMaxLength(500);
+
+            entity.Property(x => x.DeliveryFeeAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.MinimumOrderAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.IsActive)
+                .HasDefaultValue(true);
+
+            entity.Property(x => x.DisplayOrder)
+                .HasDefaultValue(0);
+
+            entity.HasIndex(x => x.BusinessId);
+
+            entity.HasIndex(x => new { x.BusinessId, x.Name })
+                .IsUnique();
+
+            entity.HasIndex(x => new { x.BusinessId, x.DisplayOrder });
+
+            entity.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<RestaurantOrderMessage>(entity =>

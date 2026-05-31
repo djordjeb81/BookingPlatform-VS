@@ -270,6 +270,7 @@ public sealed class RestaurantMenuController : ApiControllerBase
             Currency = NormalizeCurrency(request.Currency),
             IsAvailable = request.IsAvailable,
             SendToKitchen = request.SendToKitchen,
+            PreparationTimeMin = Math.Max(0, request.PreparationTimeMin),
             IsActive = true,
             DisplayOrder = request.DisplayOrder,
             CreatedAtUtc = now,
@@ -327,6 +328,7 @@ public sealed class RestaurantMenuController : ApiControllerBase
         entity.Currency = NormalizeCurrency(request.Currency);
         entity.IsAvailable = request.IsAvailable;
         entity.SendToKitchen = request.SendToKitchen;
+        entity.PreparationTimeMin = Math.Max(0, request.PreparationTimeMin);
         entity.IsActive = request.IsActive;
         entity.DisplayOrder = request.DisplayOrder;
         entity.UpdatedAtUtc = DateTime.UtcNow;
@@ -508,6 +510,7 @@ public sealed class RestaurantMenuController : ApiControllerBase
             Currency = entity.Currency,
             IsAvailable = entity.IsAvailable,
             SendToKitchen = entity.SendToKitchen,
+            PreparationTimeMin = entity.PreparationTimeMin,
             IsActive = entity.IsActive,
             DisplayOrder = entity.DisplayOrder,
             OptionGroups = entity.OptionGroups

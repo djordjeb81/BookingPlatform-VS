@@ -26,9 +26,23 @@ public sealed class RestaurantOrder : AuditableEntity
 
     public DateTime? RequestedPickupAtUtc { get; set; }
 
+    public bool IsScheduledOrder { get; set; }
+
     public string? DeliveryAddress { get; set; }
 
     public string? DeliveryNote { get; set; }
+
+    public double? DeliveryLatitude { get; set; }
+
+    public double? DeliveryLongitude { get; set; }
+
+    public long? DeliveryZoneId { get; set; }
+
+    public string? DeliveryZoneNameSnapshot { get; set; }
+
+    public decimal DeliveryFeeAmount { get; set; }
+
+    public decimal DeliveryMinimumOrderAmountSnapshot { get; set; }
 
     public RestaurantTableSession? TableSession { get; set; }
 

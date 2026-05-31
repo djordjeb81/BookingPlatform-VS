@@ -25,6 +25,7 @@ builder.Services.AddScoped<BusinessCustomerCleanupService>();
 builder.Services.AddHostedService<BusinessCustomerCleanupHostedService>();
 builder.Services.AddScoped<IFirebasePushNotificationService, FirebasePushNotificationService>();
 builder.Services.AddScoped<IChatSystemMessageService, ChatSystemMessageService>();
+builder.Services.AddScoped<ISystemAlarmService, SystemAlarmService>();
 builder.Services.AddSignalR();
 
 builder.Services.AddSwaggerGen(options =>

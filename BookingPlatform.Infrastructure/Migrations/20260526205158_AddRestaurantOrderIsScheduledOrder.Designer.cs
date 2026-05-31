@@ -3,6 +3,7 @@ using System;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BookingPlatform.Infrastructure.Migrations
 {
     [DbContext(typeof(BookingDbContext))]
-    partial class BookingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260526205158_AddRestaurantOrderIsScheduledOrder")]
+    partial class AddRestaurantOrderIsScheduledOrder
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2888,118 +2891,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("staff_service_assignments", (string)null);
                 });
 
-            modelBuilder.Entity("BookingPlatform.Domain.SystemAlarms.SystemAlarmTrigger", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("ActionKey")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<int>("AlarmType")
-                        .HasColumnType("integer");
-
-                    b.Property<long>("BusinessId")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("CancelledAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Domain")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("FiredAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsUrgent")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("PayloadJson")
-                        .HasColumnType("jsonb");
-
-                    b.Property<long?>("RelatedAppointmentId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("RelatedChatConversationId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("RelatedChatMessageId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("RelatedOrderId")
-                        .HasColumnType("bigint");
-
-                    b.Property<bool>("RequiresUserAction")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true);
-
-                    b.Property<DateTime?>("SnoozedUntilUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SoundKey")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("StoppedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long?>("TargetOperationUnitId")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("TargetType")
-                        .HasColumnType("integer");
-
-                    b.Property<long?>("TargetUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime>("TriggerAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BusinessId");
-
-                    b.HasIndex("RelatedAppointmentId");
-
-                    b.HasIndex("RelatedChatConversationId");
-
-                    b.HasIndex("RelatedOrderId");
-
-                    b.HasIndex("TargetOperationUnitId");
-
-                    b.HasIndex("TargetUserId");
-
-                    b.HasIndex("BusinessId", "Domain", "AlarmType");
-
-                    b.HasIndex("BusinessId", "Status", "TriggerAtUtc");
-
-                    b.ToTable("system_alarm_triggers", (string)null);
-                });
-
             modelBuilder.Entity("BookingPlatform.Domain.Appointments.Appointment", b =>
                 {
                     b.HasOne("BookingPlatform.Domain.Customers.BusinessCustomer", null)
@@ -3550,17 +3441,6 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasForeignKey("StaffMemberId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("BookingPlatform.Domain.SystemAlarms.SystemAlarmTrigger", b =>
-                {
-                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
-                        .WithMany()
-                        .HasForeignKey("BusinessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Business");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Appointments.Appointment", b =>

@@ -20,6 +20,8 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
     private const int ReservationSoftWarningMinutes = 30;
     private const int ReservationReleaseBeforeMinutes = 10;
     private const int ReservationLookupDays = 7;
+    private const int ReservationLookupBackHours = 8;
+    private const int ReservationAutoNoShowGraceMinutes = 30;
     private const int MaxUpcomingReservationsPerTable = 5;
 
     public RestaurantFloorPlanController(BookingDbContext dbContext) : base(dbContext)
@@ -43,6 +45,12 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
         var accessResult = await EnsureBusinessReadAccessAsync(area.BusinessId, cancellationToken);
         if (accessResult is not null)
             return accessResult;
+
+        await MarkExpiredConfirmedTableReservationsNoShowAsync(
+    businessId: area.BusinessId,
+    restaurantAreaId: restaurantAreaId,
+    statusAtUtc: statusAtUtc,
+    cancellationToken: cancellationToken);
 
         var elements = await DbContext.RestaurantLayoutElements
             .AsNoTracking()
@@ -129,7 +137,9 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
             .OrderBy(x => x.ReservationAtUtc)
             .FirstOrDefault();
 
-        var upcomingReservations = await DbContext.RestaurantTableReservations
+        var reservationLookupFromUtc = statusAtUtc.AddHours(-ReservationLookupBackHours);
+
+        var tableReservationsForDisplay = await DbContext.RestaurantTableReservations
             .AsNoTracking()
             .Where(x =>
                 x.BusinessId == area.BusinessId &&
@@ -137,10 +147,24 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 x.TableResourceId.HasValue &&
                 resourceIds.Contains(x.TableResourceId.Value) &&
                 x.Status == RestaurantTableReservationStatus.Confirmed &&
-                x.ReservationAtUtc >= statusAtUtc &&
+                x.ReservationAtUtc >= reservationLookupFromUtc &&
                 x.ReservationAtUtc <= reservationLookupToUtc)
             .OrderBy(x => x.ReservationAtUtc)
             .ToListAsync(cancellationToken);
+
+        var upcomingReservations = tableReservationsForDisplay
+            .Where(x =>
+            {
+                var durationMin = x.ExpectedDurationMin.GetValueOrDefault(120);
+
+                if (durationMin <= 0)
+                    durationMin = 120;
+
+                var reservationEndUtc = x.ReservationAtUtc.AddMinutes(durationMin);
+
+                return reservationEndUtc > statusAtUtc;
+            })
+            .ToList();
 
         var unassignedUpcomingReservations = await DbContext.RestaurantTableReservations
     .AsNoTracking()
@@ -302,6 +326,63 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
 
         return Ok(result);
     }
+
+    private async Task MarkExpiredConfirmedTableReservationsNoShowAsync(
+    long businessId,
+    long restaurantAreaId,
+    DateTime statusAtUtc,
+    CancellationToken cancellationToken)
+    {
+        var autoNoShowBeforeUtc = statusAtUtc.AddMinutes(-ReservationAutoNoShowGraceMinutes);
+
+        var candidates = await DbContext.RestaurantTableReservations
+            .Where(x =>
+                x.BusinessId == businessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                x.ReservationAtUtc <= autoNoShowBeforeUtc)
+            .ToListAsync(cancellationToken);
+
+        var changed = false;
+
+        foreach (var reservation in candidates)
+        {
+            var durationMin = reservation.ExpectedDurationMin.GetValueOrDefault(120);
+
+            if (durationMin <= 0)
+                durationMin = 120;
+
+            var reservationEndUtc = reservation.ReservationAtUtc.AddMinutes(durationMin);
+
+            if (reservationEndUtc > autoNoShowBeforeUtc)
+                continue;
+
+            if (reservation.ArrivedAtUtc.HasValue)
+                continue;
+
+            if (reservation.CreatedTableSessionId.HasValue)
+                continue;
+
+            reservation.Status = RestaurantTableReservationStatus.NoShow;
+            reservation.UpdatedAtUtc = statusAtUtc;
+            reservation.InternalNote = AppendInternalNote(
+                reservation.InternalNote,
+                "Automatski označeno kao nedolazak jer je termin prošao bez evidentiranog dolaska.");
+
+            changed = true;
+        }
+
+        if (changed)
+            await DbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string AppendInternalNote(string? existingNote, string note)
+    {
+        if (string.IsNullOrWhiteSpace(existingNote))
+            return note;
+
+        return existingNote + Environment.NewLine + note;
+    }
     private static RestaurantAreaReservationSummaryDto ToAreaReservationSummaryDto(
     RestaurantAreaReservation entity)
     {
@@ -336,17 +417,30 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
 
             var endUtc = currentAreaReservation.ReservationAtUtc.AddMinutes(durationMin);
 
-            return $"Cela sala je trenutno rezervisana do {endUtc:HH:mm}.";
+            var endLocal = DateTime.SpecifyKind(
+                    endUtc,
+                    DateTimeKind.Utc)
+                .ToLocalTime();
+
+            return $"Cela sala je trenutno rezervisana do {endLocal:HH:mm}.";
         }
 
         if (nextAreaReservation is null)
             return null;
 
+        var reservationAtLocal = DateTime.SpecifyKind(
+                nextAreaReservation.ReservationAtUtc,
+                DateTimeKind.Utc)
+            .ToLocalTime();
+
+        var mustBeFreeByLocal = DateTime.SpecifyKind(
+                nextAreaReservation.ReservationAtUtc.AddMinutes(-ReservationReleaseBeforeMinutes),
+                DateTimeKind.Utc)
+            .ToLocalTime();
+
         var minutesToReservation = (nextAreaReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
-        var reservationTimeText = nextAreaReservation.ReservationAtUtc.ToString("HH:mm");
-        var mustBeFreeByText = nextAreaReservation.ReservationAtUtc
-            .AddMinutes(-ReservationReleaseBeforeMinutes)
-            .ToString("HH:mm");
+        var reservationTimeText = reservationAtLocal.ToString("HH:mm");
+        var mustBeFreeByText = mustBeFreeByLocal.ToString("HH:mm");
 
         if (minutesToReservation <= ReservationSoftWarningMinutes)
         {
@@ -516,6 +610,16 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
 
         if (nextReservation is not null)
         {
+            var durationMin = nextReservation.ExpectedDurationMin.GetValueOrDefault(120);
+
+            if (durationMin <= 0)
+                durationMin = 120;
+
+            var reservationEndUtc = nextReservation.ReservationAtUtc.AddMinutes(durationMin);
+
+            if (nextReservation.ReservationAtUtc <= statusAtUtc && statusAtUtc < reservationEndUtc)
+                return RestaurantResourceVisualStatusDto.ReservedLater;
+
             var minutesToReservation = (nextReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
 
             if (minutesToReservation <= ReservationSoftWarningMinutes)
@@ -524,7 +628,6 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
 
         return RestaurantResourceVisualStatusDto.Available;
     }
-
     private static string? BuildReservationWarningText(
         RestaurantTableReservation? nextReservation,
         DateTime statusAtUtc)
@@ -532,11 +635,36 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
         if (nextReservation is null)
             return null;
 
+        var durationMin = nextReservation.ExpectedDurationMin.GetValueOrDefault(120);
+
+        if (durationMin <= 0)
+            durationMin = 120;
+
+        var reservationEndUtc = nextReservation.ReservationAtUtc.AddMinutes(durationMin);
+
+        var reservationAtLocal = DateTime.SpecifyKind(
+                nextReservation.ReservationAtUtc,
+                DateTimeKind.Utc)
+            .ToLocalTime();
+
+        var reservationEndLocal = DateTime.SpecifyKind(
+                reservationEndUtc,
+                DateTimeKind.Utc)
+            .ToLocalTime();
+
+        var mustBeFreeByLocal = DateTime.SpecifyKind(
+                nextReservation.ReservationAtUtc.AddMinutes(-ReservationReleaseBeforeMinutes),
+                DateTimeKind.Utc)
+            .ToLocalTime();
+
+        if (nextReservation.ReservationAtUtc <= statusAtUtc && statusAtUtc < reservationEndUtc)
+        {
+            return $"Sto ima rezervaciju koja je u toku do {reservationEndLocal:HH:mm}.";
+        }
+
         var minutesToReservation = (nextReservation.ReservationAtUtc - statusAtUtc).TotalMinutes;
-        var reservationTimeText = nextReservation.ReservationAtUtc.ToString("HH:mm");
-        var mustBeFreeByText = nextReservation.ReservationAtUtc
-            .AddMinutes(-ReservationReleaseBeforeMinutes)
-            .ToString("HH:mm");
+        var reservationTimeText = reservationAtLocal.ToString("HH:mm");
+        var mustBeFreeByText = mustBeFreeByLocal.ToString("HH:mm");
 
         if (minutesToReservation <= ReservationSoftWarningMinutes)
         {

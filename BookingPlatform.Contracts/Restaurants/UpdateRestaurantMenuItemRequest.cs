@@ -16,6 +16,8 @@ public sealed class UpdateRestaurantMenuItemRequest
 
     public bool SendToKitchen { get; set; } = true;
 
+    public int PreparationTimeMin { get; set; }
+
     public bool IsActive { get; set; }
 
     public int DisplayOrder { get; set; }
