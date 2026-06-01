@@ -13,17 +13,20 @@ public sealed class ChatSystemMessageService : IChatSystemMessageService
     private readonly IFirebasePushNotificationService _pushNotificationService;
     private readonly IHubContext<BusinessActivityHub> _businessActivityHub;
     private readonly IConfiguration _configuration;
+    private readonly ISystemAlarmService _systemAlarmService;
 
     public ChatSystemMessageService(
         BookingDbContext dbContext,
         IFirebasePushNotificationService pushNotificationService,
         IHubContext<BusinessActivityHub> businessActivityHub,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ISystemAlarmService systemAlarmService)
     {
         _dbContext = dbContext;
         _pushNotificationService = pushNotificationService;
         _businessActivityHub = businessActivityHub;
         _configuration = configuration;
+        _systemAlarmService = systemAlarmService;
     }
 
     public async Task SendDelayProposalToCustomerAsync(
@@ -544,6 +547,17 @@ public sealed class ChatSystemMessageService : IChatSystemMessageService
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        if (ShouldCreateUrgentChatAlarmForBusiness(pushType))
+        {
+            await _systemAlarmService.CreateChatUrgentMessageAlarmAsync(
+                businessId: appointment.BusinessId,
+                chatConversationId: conversation.Id,
+                chatMessageId: message.Id,
+                messagePreview: pushTitle,
+                cancellationToken: cancellationToken);
+        }
+
+
         await _businessActivityHub.Clients
             .Group(BusinessActivityHub.BusinessGroupName(appointment.BusinessId))
             .SendAsync(
@@ -579,6 +593,17 @@ public sealed class ChatSystemMessageService : IChatSystemMessageService
             // Push nije kritičan za Desktop osvežavanje.
             // Sistemsku poruku smo već upisali i SignalR smo već poslali.
         }
+    }
+
+    private static bool ShouldCreateUrgentChatAlarmForBusiness(string pushType)
+    {
+        return pushType is
+            "newBookingRequest" or
+            "appointmentRescheduleRequest" or
+            "appointmentCancelledByCustomer" or
+            "appointmentRequestWithdrawnByCustomer" or
+            "appointmentProposalAccepted" or
+            "appointmentProposalRejected";
     }
 
     private static string GetProposalDisplayName(AppointmentChangeRequest changeRequest)

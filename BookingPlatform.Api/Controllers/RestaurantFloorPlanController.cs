@@ -6,6 +6,7 @@ using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Api.Services;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -24,8 +25,14 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
     private const int ReservationAutoNoShowGraceMinutes = 30;
     private const int MaxUpcomingReservationsPerTable = 5;
 
-    public RestaurantFloorPlanController(BookingDbContext dbContext) : base(dbContext)
+    private readonly ISystemAlarmService _systemAlarmService;
+
+    public RestaurantFloorPlanController(
+        BookingDbContext dbContext,
+        ISystemAlarmService systemAlarmService)
+        : base(dbContext)
     {
+        _systemAlarmService = systemAlarmService;
     }
 
     [HttpGet("area/{restaurantAreaId:long}")]
@@ -328,10 +335,10 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
     }
 
     private async Task MarkExpiredConfirmedTableReservationsNoShowAsync(
-    long businessId,
-    long restaurantAreaId,
-    DateTime statusAtUtc,
-    CancellationToken cancellationToken)
+      long businessId,
+      long restaurantAreaId,
+      DateTime statusAtUtc,
+      CancellationToken cancellationToken)
     {
         var autoNoShowBeforeUtc = statusAtUtc.AddMinutes(-ReservationAutoNoShowGraceMinutes);
 
@@ -343,7 +350,7 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 x.ReservationAtUtc <= autoNoShowBeforeUtc)
             .ToListAsync(cancellationToken);
 
-        var changed = false;
+        var changedReservationIds = new List<long>();
 
         foreach (var reservation in candidates)
         {
@@ -369,11 +376,21 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 reservation.InternalNote,
                 "Automatski označeno kao nedolazak jer je termin prošao bez evidentiranog dolaska.");
 
-            changed = true;
+            changedReservationIds.Add(reservation.Id);
         }
 
-        if (changed)
-            await DbContext.SaveChangesAsync(cancellationToken);
+        if (changedReservationIds.Count == 0)
+            return;
+
+        await DbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var reservationId in changedReservationIds)
+        {
+            await _systemAlarmService.CancelRestaurantTableShouldBeFreeAlarmForReservationAsync(
+                businessId,
+                reservationId,
+                cancellationToken);
+        }
     }
 
     private static string AppendInternalNote(string? existingNote, string note)

@@ -17,6 +17,13 @@ public interface ISystemAlarmService
         DateTime nowUtc,
         CancellationToken cancellationToken);
 
+    Task<SystemAlarmTrigger> CreateChatUrgentMessageAlarmAsync(
+    long businessId,
+    long chatConversationId,
+    long chatMessageId,
+    string messagePreview,
+    CancellationToken cancellationToken);
+
     Task<bool> MarkFiredAsync(
         long alarmId,
         CancellationToken cancellationToken);
@@ -24,6 +31,10 @@ public interface ISystemAlarmService
     Task<bool> StopAsync(
         long alarmId,
         CancellationToken cancellationToken);
+
+    Task<bool> ResolveRestaurantTableShouldBeFreeIfNoConflictAsync(
+    long alarmId,
+    CancellationToken cancellationToken);
 
     Task<bool> SnoozeAsync(
         long alarmId,

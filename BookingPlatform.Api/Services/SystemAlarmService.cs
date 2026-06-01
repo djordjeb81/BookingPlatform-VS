@@ -2,6 +2,7 @@
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using BookingPlatform.Domain.Restaurants;
 
 namespace BookingPlatform.Api.Services;
 
@@ -86,6 +87,76 @@ public sealed class SystemAlarmService : ISystemAlarmService
         await SendRestaurantAlarmPushAsync(
             alarm,
             cancellationToken);
+
+        return alarm;
+    }
+
+    public async Task<SystemAlarmTrigger> CreateChatUrgentMessageAlarmAsync(
+    long businessId,
+    long chatConversationId,
+    long chatMessageId,
+    string messagePreview,
+    CancellationToken cancellationToken)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        var safePreview = string.IsNullOrWhiteSpace(messagePreview)
+            ? "Stigla je hitna chat poruka."
+            : messagePreview.Trim();
+
+        if (safePreview.Length > 180)
+            safePreview = safePreview[..180] + "...";
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            businessId,
+            chatConversationId,
+            chatMessageId
+        });
+
+        var alarm = new SystemAlarmTrigger
+        {
+            BusinessId = businessId,
+            Domain = SystemAlarmDomain.Chat,
+            AlarmType = SystemAlarmType.ChatUrgentMessage,
+            Status = SystemAlarmStatus.Pending,
+            TargetType = SystemAlarmTargetType.Business,
+            RelatedChatConversationId = chatConversationId,
+            RelatedChatMessageId = chatMessageId,
+            TriggerAtUtc = nowUtc,
+            CreatedAtUtc = nowUtc,
+            Title = "Hitna chat poruka",
+            Message = safePreview,
+            SoundKey = "chat_urgent",
+            IsUrgent = true,
+            RequiresUserAction = true,
+            ActionKey = "open_chat",
+            PayloadJson = payload
+        };
+
+        _db.SystemAlarmTriggers.Add(alarm);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await _pushService.SendToBusinessUsersAsync(
+            businessId: businessId,
+            title: alarm.Title,
+            body: alarm.Message,
+            data: new Dictionary<string, string>
+            {
+                ["type"] = "system_alarm",
+                ["businessId"] = businessId.ToString(),
+                ["alarmId"] = alarm.Id.ToString(),
+                ["alarmType"] = ((int)alarm.AlarmType).ToString(),
+                ["domain"] = ((int)alarm.Domain).ToString(),
+                ["title"] = alarm.Title,
+                ["body"] = alarm.Message,
+                ["soundKey"] = alarm.SoundKey,
+                ["actionKey"] = alarm.ActionKey ?? string.Empty,
+                ["payloadJson"] = alarm.PayloadJson ?? string.Empty,
+                ["conversationId"] = chatConversationId.ToString(),
+                ["messageId"] = chatMessageId.ToString()
+            },
+            cancellationToken: cancellationToken);
 
         return alarm;
     }
@@ -275,6 +346,97 @@ public sealed class SystemAlarmService : ISystemAlarmService
         return true;
     }
 
+    public async Task<bool> ResolveRestaurantTableShouldBeFreeIfNoConflictAsync(
+    long alarmId,
+    CancellationToken cancellationToken)
+    {
+        var alarm = await _db.SystemAlarmTriggers
+            .FirstOrDefaultAsync(x => x.Id == alarmId, cancellationToken);
+
+        if (alarm is null)
+            return false;
+
+        if (alarm.Domain != SystemAlarmDomain.Restaurant ||
+            alarm.AlarmType != SystemAlarmType.RestaurantTableShouldBeFree)
+        {
+            return false;
+        }
+
+        if (alarm.Status is SystemAlarmStatus.Cancelled
+            or SystemAlarmStatus.Stopped
+            or SystemAlarmStatus.Expired)
+        {
+            return true;
+        }
+
+        var reservationId = TryReadLongFromPayload(alarm.PayloadJson, "restaurantTableReservationId");
+        var sessionId = TryReadLongFromPayload(alarm.PayloadJson, "restaurantTableSessionId");
+        var tableResourceId = TryReadLongFromPayload(alarm.PayloadJson, "tableResourceId");
+
+        var conflictStillExists = false;
+
+        if (reservationId.HasValue)
+        {
+            var reservation = await _db.RestaurantTableReservations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x =>
+                    x.Id == reservationId.Value &&
+                    x.BusinessId == alarm.BusinessId,
+                    cancellationToken);
+
+            if (reservation is not null &&
+                reservation.Status == RestaurantTableReservationStatus.Confirmed)
+            {
+                if (tableResourceId.HasValue &&
+                    reservation.TableResourceId == tableResourceId.Value)
+                {
+                    conflictStillExists = true;
+                }
+            }
+        }
+
+        if (sessionId.HasValue)
+        {
+            var sessionStillActive = await _db.RestaurantTableSessions
+                .AsNoTracking()
+                .AnyAsync(x =>
+                    x.Id == sessionId.Value &&
+                    x.BusinessId == alarm.BusinessId &&
+                    x.Status == RestaurantTableSessionStatus.Active &&
+                    x.ReleasedAtUtc == null,
+                    cancellationToken);
+
+            if (sessionStillActive)
+                conflictStillExists = true;
+        }
+        else if (tableResourceId.HasValue)
+        {
+            var activeSessionOnTable = await _db.RestaurantTableSessions
+                .AsNoTracking()
+                .AnyAsync(x =>
+                    x.BusinessId == alarm.BusinessId &&
+                    x.TableResourceId == tableResourceId.Value &&
+                    x.Status == RestaurantTableSessionStatus.Active &&
+                    x.ReleasedAtUtc == null,
+                    cancellationToken);
+
+            if (activeSessionOnTable)
+                conflictStillExists = true;
+        }
+
+        if (conflictStillExists)
+            return false;
+
+        var nowUtc = DateTime.UtcNow;
+
+        alarm.Status = SystemAlarmStatus.Stopped;
+        alarm.StoppedAtUtc = nowUtc;
+        alarm.SnoozedUntilUtc = null;
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<bool> SnoozeAsync(
         long alarmId,
         int minutes,
@@ -405,6 +567,29 @@ public sealed class SystemAlarmService : ISystemAlarmService
             body: alarm.Message,
             data: data,
             cancellationToken: cancellationToken);
+    }
+
+    private static long? TryReadLongFromPayload(string? payloadJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+
+            if (document.RootElement.TryGetProperty(propertyName, out var element) &&
+                element.TryGetInt64(out var value))
+            {
+                return value;
+            }
+        }
+        catch
+        {
+            // Neispravan payload ne sme da prekine proveru alarma.
+        }
+
+        return null;
     }
 
     private static DateTime EnsureUtc(DateTime value)

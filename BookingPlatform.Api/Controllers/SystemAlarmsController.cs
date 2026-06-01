@@ -84,6 +84,28 @@ public sealed class SystemAlarmsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{alarmId:long}/resolve-if-no-conflict")]
+    public async Task<IActionResult> ResolveIfNoConflict(
+    [FromRoute] long alarmId,
+    CancellationToken cancellationToken)
+    {
+        if (alarmId <= 0)
+        {
+            return BadRequest("AlarmId nije ispravan.");
+        }
+
+        var success = await _systemAlarmService.ResolveRestaurantTableShouldBeFreeIfNoConflictAsync(
+            alarmId,
+            cancellationToken);
+
+        if (!success)
+        {
+            return Conflict("Alarm nije zaustavljen jer konflikt još postoji ili alarm nije pronađen.");
+        }
+
+        return NoContent();
+    }
+
     [HttpPost("{alarmId:long}/snooze")]
     public async Task<IActionResult> Snooze(
         [FromRoute] long alarmId,

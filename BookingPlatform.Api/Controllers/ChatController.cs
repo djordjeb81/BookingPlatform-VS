@@ -21,15 +21,18 @@ public sealed class ChatController : ApiControllerBase
 {
     private readonly IHubContext<BusinessActivityHub> _businessActivityHub;
     private readonly IFirebasePushNotificationService _pushNotificationService;
+    private readonly ISystemAlarmService _systemAlarmService;
 
     public ChatController(
         BookingDbContext dbContext,
         IHubContext<BusinessActivityHub> businessActivityHub,
-        IFirebasePushNotificationService pushNotificationService)
+        IFirebasePushNotificationService pushNotificationService,
+        ISystemAlarmService systemAlarmService)
         : base(dbContext)
     {
         _businessActivityHub = businessActivityHub;
         _pushNotificationService = pushNotificationService;
+        _systemAlarmService = systemAlarmService;
     }
 
     [HttpGet("business/{businessId:long}/conversations")]
@@ -533,6 +536,95 @@ public sealed class ChatController : ApiControllerBase
                 ["businessId"] = conversation.BusinessId.ToString()
             },
             cancellationToken);
+
+        return Ok(new ChatMessageDto
+        {
+            Id = message.Id,
+            ConversationId = message.ConversationId,
+            SenderType = message.SenderType.ToString(),
+            SenderUserId = message.SenderUserId,
+            Text = message.Text,
+            ActionType = message.ActionType,
+            AppointmentId = message.AppointmentId,
+            ChangeRequestId = message.ChangeRequestId,
+            CreatedAtUtc = message.CreatedAtUtc,
+            ReadByBusinessAtUtc = message.ReadByBusinessAtUtc,
+            ReadByCustomerAtUtc = message.ReadByCustomerAtUtc
+        });
+    }
+
+    [HttpPost("conversations/{conversationId:long}/messages/customer/urgent")]
+    [ProducesResponseType(typeof(ChatMessageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ChatMessageDto>> SendCustomerUrgentMessage(
+    [FromRoute] long conversationId,
+    [FromBody] SendChatMessageRequest request,
+    CancellationToken cancellationToken)
+    {
+        var conversation = await DbContext.ChatConversations
+            .FirstOrDefaultAsync(x => x.Id == conversationId && x.IsActive, cancellationToken);
+
+        if (conversation is null)
+            return NotFound("Razgovor ne postoji.");
+
+        var userId = TryGetCurrentUserId();
+
+        if (!userId.HasValue)
+            return Unauthorized("Korisnik nije prijavljen.");
+
+        if (!conversation.AppUserId.HasValue || conversation.AppUserId.Value != userId.Value)
+            return Forbid();
+
+        var text = request.Text?.Trim();
+
+        if (string.IsNullOrWhiteSpace(text))
+            return BadRequest("Unesite tekst poruke.");
+
+        if (text.Length > 2000)
+            return BadRequest("Poruka može imati najviše 2000 karaktera.");
+
+        var now = DateTime.UtcNow;
+
+        var message = new ChatMessage
+        {
+            ConversationId = conversation.Id,
+            SenderType = ChatSenderType.Customer,
+            SenderUserId = userId,
+            Text = text,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            ReadByCustomerAtUtc = now
+        };
+
+        conversation.LastMessageAtUtc = now;
+        conversation.LastMessageText = text.Length > 500 ? text[..500] : text;
+        conversation.UnreadForBusinessCount += 1;
+        conversation.UpdatedAtUtc = now;
+
+        DbContext.ChatMessages.Add(message);
+        await DbContext.SaveChangesAsync(cancellationToken);
+
+        await _systemAlarmService.CreateChatUrgentMessageAlarmAsync(
+            businessId: conversation.BusinessId,
+            chatConversationId: conversation.Id,
+            chatMessageId: message.Id,
+            messagePreview: text,
+            cancellationToken: cancellationToken);
+
+        await _businessActivityHub.Clients
+            .Group(BusinessActivityHub.BusinessGroupName(conversation.BusinessId))
+            .SendAsync(
+                "BusinessActivityChanged",
+                new
+                {
+                    businessId = conversation.BusinessId,
+                    conversationId = conversation.Id,
+                    messageId = message.Id,
+                    activityType = "ChatUrgentMessage"
+                },
+                cancellationToken);
 
         return Ok(new ChatMessageDto
         {

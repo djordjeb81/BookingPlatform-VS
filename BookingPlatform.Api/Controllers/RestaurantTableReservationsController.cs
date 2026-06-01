@@ -193,8 +193,9 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
                 tableIds.Contains(x.TableResourceId.Value) &&
                 x.Status != RestaurantTableReservationStatus.Rejected &&
                 x.Status != RestaurantTableReservationStatus.Cancelled &&
-                x.Status != RestaurantTableReservationStatus.NoShow)
-            .Select(x => new
+                x.Status != RestaurantTableReservationStatus.NoShow &&
+                x.Status != RestaurantTableReservationStatus.Arrived)
+                    .Select(x => new
             {
                 TableResourceId = x.TableResourceId!.Value,
                 x.ReservationAtUtc,
@@ -1104,8 +1105,9 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
                 x.Status != RestaurantTableReservationStatus.Rejected &&
                 x.Status != RestaurantTableReservationStatus.Cancelled &&
                 x.Status != RestaurantTableReservationStatus.NoShow &&
+                x.Status != RestaurantTableReservationStatus.Arrived &&
                 (!currentReservationId.HasValue || x.Id != currentReservationId.Value))
-            .Select(x => new
+                    .Select(x => new
             {
                 x.Id,
                 x.ReservationAtUtc,
