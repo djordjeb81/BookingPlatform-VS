@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BookingPlatform.Api.Services;
+using BookingPlatform.Contracts.CustomerPortal;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -37,8 +38,8 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
 
     [HttpGet("area/{restaurantAreaId:long}")]
     public async Task<ActionResult<RestaurantFloorPlanDto>> GetAreaFloorPlan(
-        [FromRoute] long restaurantAreaId,
-        CancellationToken cancellationToken)
+       [FromRoute] long restaurantAreaId,
+       CancellationToken cancellationToken)
     {
         var statusAtUtc = DateTime.UtcNow;
 
@@ -54,10 +55,215 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
             return accessResult;
 
         await MarkExpiredConfirmedTableReservationsNoShowAsync(
-    businessId: area.BusinessId,
-    restaurantAreaId: restaurantAreaId,
-    statusAtUtc: statusAtUtc,
-    cancellationToken: cancellationToken);
+            businessId: area.BusinessId,
+            restaurantAreaId: restaurantAreaId,
+            statusAtUtc: statusAtUtc,
+            cancellationToken: cancellationToken);
+
+        var result = await BuildAreaFloorPlanDtoAsync(
+            area,
+            statusAtUtc,
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpGet("area/{restaurantAreaId:long}/customer")]
+    [ProducesResponseType(typeof(CustomerRestaurantFloorPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CustomerRestaurantFloorPlanDto>> GetCustomerAreaFloorPlan(
+    [FromRoute] long restaurantAreaId,
+    CancellationToken cancellationToken)
+    {
+        var statusAtUtc = DateTime.UtcNow;
+
+        var area = await DbContext.RestaurantAreas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == restaurantAreaId, cancellationToken);
+
+        if (area is null)
+            return NotFound("Sala ne postoji.");
+
+        var accessResult = await EnsureCustomerBusinessAccessAsync(area.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var fullFloorPlan = await BuildAreaFloorPlanDtoAsync(
+            area,
+            statusAtUtc,
+            cancellationToken);
+
+        return Ok(ToCustomerFloorPlanDto(fullFloorPlan));
+    }
+
+    [HttpGet("business/{businessId:long}/areas/customer")]
+    [ProducesResponseType(typeof(List<CustomerRestaurantAreaDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<List<CustomerRestaurantAreaDto>>> GetCustomerRestaurantAreas(
+    [FromRoute] long businessId,
+    CancellationToken cancellationToken)
+    {
+        if (businessId <= 0)
+            return BadRequest("businessId je obavezan.");
+
+        var accessResult = await EnsureCustomerBusinessAccessAsync(businessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var items = await DbContext.RestaurantAreas
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == businessId &&
+                x.IsActive)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new CustomerRestaurantAreaDto
+            {
+                Id = x.Id,
+                BusinessId = x.BusinessId,
+                Name = x.Name,
+                DisplayOrder = x.DisplayOrder
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(items);
+    }
+
+    [HttpGet("area/{restaurantAreaId:long}/table-schedule/customer")]
+    [ProducesResponseType(typeof(List<CustomerRestaurantTableScheduleItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<CustomerRestaurantTableScheduleItemDto>>> GetCustomerTableSchedule(
+    [FromRoute] long restaurantAreaId,
+    [FromQuery] long tableResourceId,
+    [FromQuery] DateOnly date,
+    CancellationToken cancellationToken)
+    {
+        if (restaurantAreaId <= 0)
+            return BadRequest("restaurantAreaId je obavezan.");
+
+        if (tableResourceId <= 0)
+            return BadRequest("tableResourceId je obavezan.");
+
+        var area = await DbContext.RestaurantAreas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == restaurantAreaId, cancellationToken);
+
+        if (area is null)
+            return NotFound("Sala ne postoji.");
+
+        var accessResult = await EnsureCustomerBusinessAccessAsync(area.BusinessId, cancellationToken);
+        if (accessResult is not null)
+            return accessResult;
+
+        var tableExists = await DbContext.Resources
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.Id == tableResourceId &&
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.IsActive &&
+                (
+                    x.ResourceType == ResourceType.Table ||
+                    x.ResourceType == ResourceType.DiningTable
+                ),
+                cancellationToken);
+
+        if (!tableExists)
+            return BadRequest("Izabrani sto ne postoji ili ne pripada izabranoj sali.");
+
+        var dayStartUtc = DateTime.SpecifyKind(
+            date.ToDateTime(TimeOnly.MinValue),
+            DateTimeKind.Utc);
+
+        var dayEndUtc = dayStartUtc.AddDays(1);
+
+        var result = new List<CustomerRestaurantTableScheduleItemDto>();
+
+        var reservations = await DbContext.RestaurantTableReservations
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.TableResourceId == tableResourceId &&
+(
+    x.Status == RestaurantTableReservationStatus.PendingApproval ||
+    x.Status == RestaurantTableReservationStatus.Confirmed
+) &&
+                x.ReservationAtUtc < dayEndUtc)
+            .Select(x => new
+            {
+                x.ReservationAtUtc,
+                x.ExpectedDurationMin
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var reservation in reservations)
+        {
+            var fromUtc = EnsureUtc(reservation.ReservationAtUtc);
+
+            var durationMin = reservation.ExpectedDurationMin.GetValueOrDefault(120);
+            if (durationMin <= 0)
+                durationMin = 120;
+
+            var untilUtc = fromUtc.AddMinutes(durationMin);
+
+            var overlapsSelectedDate = fromUtc < dayEndUtc && untilUtc > dayStartUtc;
+            if (!overlapsSelectedDate)
+                continue;
+
+            result.Add(new CustomerRestaurantTableScheduleItemDto
+            {
+                FromUtc = fromUtc,
+                UntilUtc = untilUtc,
+                Status = 2,
+                StatusText = "Rezervisano"
+            });
+        }
+
+        var sessions = await DbContext.RestaurantTableSessions
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.TableResourceId == tableResourceId &&
+                x.Status == RestaurantTableSessionStatus.Active &&
+                x.ReleasedAtUtc == null)
+            .Select(x => new
+            {
+                x.StartedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var session in sessions)
+        {
+            var fromUtc = EnsureUtc(session.StartedAtUtc);
+
+            result.Add(new CustomerRestaurantTableScheduleItemDto
+            {
+                FromUtc = fromUtc,
+                UntilUtc = DateTime.UtcNow,
+                Status = 1,
+                StatusText = "Trenutno zauzeto"
+            });
+        }
+
+        return Ok(result
+            .OrderBy(x => x.FromUtc)
+            .ToList());
+    }
+
+    private async Task<RestaurantFloorPlanDto> BuildAreaFloorPlanDtoAsync(
+    RestaurantArea area,
+    DateTime statusAtUtc,
+    CancellationToken cancellationToken)
+    {
+        var restaurantAreaId = area.Id;
 
         var elements = await DbContext.RestaurantLayoutElements
             .AsNoTracking()
@@ -115,15 +321,15 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
         var reservationLookupToUtc = statusAtUtc.AddDays(ReservationLookupDays);
 
         var upcomingAreaReservations = await DbContext.RestaurantAreaReservations
-    .AsNoTracking()
-    .Where(x =>
-        x.BusinessId == area.BusinessId &&
-        x.RestaurantAreaId == restaurantAreaId &&
-        x.Status == RestaurantAreaReservationStatus.Confirmed &&
-        x.ReservationAtUtc <= reservationLookupToUtc)
-    .OrderBy(x => x.ReservationAtUtc)
-    .Take(20)
-    .ToListAsync(cancellationToken);
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                x.Status == RestaurantAreaReservationStatus.Confirmed &&
+                x.ReservationAtUtc <= reservationLookupToUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .Take(20)
+            .ToListAsync(cancellationToken);
 
         var currentAreaReservation = upcomingAreaReservations
             .FirstOrDefault(x =>
@@ -153,7 +359,10 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 x.RestaurantAreaId == restaurantAreaId &&
                 x.TableResourceId.HasValue &&
                 resourceIds.Contains(x.TableResourceId.Value) &&
-                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                (
+    x.Status == RestaurantTableReservationStatus.PendingApproval ||
+    x.Status == RestaurantTableReservationStatus.Confirmed
+) &&
                 x.ReservationAtUtc >= reservationLookupFromUtc &&
                 x.ReservationAtUtc <= reservationLookupToUtc)
             .OrderBy(x => x.ReservationAtUtc)
@@ -174,17 +383,17 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
             .ToList();
 
         var unassignedUpcomingReservations = await DbContext.RestaurantTableReservations
-    .AsNoTracking()
-    .Where(x =>
-        x.BusinessId == area.BusinessId &&
-        x.RestaurantAreaId == restaurantAreaId &&
-        !x.TableResourceId.HasValue &&
-        x.Status == RestaurantTableReservationStatus.Confirmed &&
-        x.ReservationAtUtc >= statusAtUtc &&
-        x.ReservationAtUtc <= reservationLookupToUtc)
-    .OrderBy(x => x.ReservationAtUtc)
-    .Take(50)
-    .ToListAsync(cancellationToken);
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == area.BusinessId &&
+                x.RestaurantAreaId == restaurantAreaId &&
+                !x.TableResourceId.HasValue &&
+                x.Status == RestaurantTableReservationStatus.Confirmed &&
+                x.ReservationAtUtc >= statusAtUtc &&
+                x.ReservationAtUtc <= reservationLookupToUtc)
+            .OrderBy(x => x.ReservationAtUtc)
+            .Take(50)
+            .ToListAsync(cancellationToken);
 
         var nextReservationByTableId = upcomingReservations
             .GroupBy(x => x.TableResourceId!.Value)
@@ -193,13 +402,13 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 g => g.OrderBy(x => x.ReservationAtUtc).First());
 
         var upcomingReservationsByTableId = upcomingReservations
-    .GroupBy(x => x.TableResourceId!.Value)
-    .ToDictionary(
-        g => g.Key,
-        g => g
-            .OrderBy(x => x.ReservationAtUtc)
-            .Take(MaxUpcomingReservationsPerTable)
-            .ToList());
+            .GroupBy(x => x.TableResourceId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g
+                    .OrderBy(x => x.ReservationAtUtc)
+                    .Take(MaxUpcomingReservationsPerTable)
+                    .ToList());
 
         var activeSessionIds = activeSessions
             .Select(x => x.Id)
@@ -249,7 +458,11 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
                 g => g.Key,
                 g => g.Sum(x => x.Amount));
 
-        var areaStatus = GetAreaStatus(area.IsActive, currentAreaReservation, nextAreaReservation, statusAtUtc);
+        var areaStatus = GetAreaStatus(
+            area.IsActive,
+            currentAreaReservation,
+            nextAreaReservation,
+            statusAtUtc);
 
         var resourceDtos = resources
             .Select(resource =>
@@ -298,40 +511,47 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
             AreaStatus = (int)areaStatus,
             AreaStatusText = GetAreaStatusText(areaStatus),
             StatusAtUtc = statusAtUtc,
+
             CurrentAreaReservationId = currentAreaReservation?.Id,
             CurrentAreaReservationStartedAtUtc = currentAreaReservation?.ReservationAtUtc,
             CurrentAreaReservationEndsAtUtc = currentAreaReservation is null
-    ? null
-    : currentAreaReservation.ReservationAtUtc.AddMinutes(
-        currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240) <= 0
-            ? 240
-            : currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240)),
+                ? null
+                : currentAreaReservation.ReservationAtUtc.AddMinutes(
+                    currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240) <= 0
+                        ? 240
+                        : currentAreaReservation.ExpectedDurationMin.GetValueOrDefault(240)),
             CurrentAreaReservationCustomerName = currentAreaReservation?.CustomerName,
             CurrentAreaReservationPartySize = currentAreaReservation?.PartySize,
+
             NextAreaReservationId = nextAreaReservation?.Id,
             NextAreaReservationAtUtc = nextAreaReservation?.ReservationAtUtc,
             NextAreaReservationCustomerName = nextAreaReservation?.CustomerName,
             NextAreaReservationPartySize = nextAreaReservation?.PartySize,
+
             AreaReservationWarningText = BuildAreaReservationWarningText(
-    currentAreaReservation,
-    nextAreaReservation,
-    statusAtUtc),
+                currentAreaReservation,
+                nextAreaReservation,
+                statusAtUtc),
+
             UpcomingAreaReservations = upcomingAreaReservations
-    .Select(ToAreaReservationSummaryDto)
-    .ToList(),
+                .Select(ToAreaReservationSummaryDto)
+                .ToList(),
+
             UnassignedUpcomingReservationCount = unassignedUpcomingReservations.Count,
             NextUnassignedReservationAtUtc = unassignedUpcomingReservations
-    .OrderBy(x => x.ReservationAtUtc)
-    .FirstOrDefault()
-    ?.ReservationAtUtc,
+                .OrderBy(x => x.ReservationAtUtc)
+                .FirstOrDefault()
+                ?.ReservationAtUtc,
+
             UnassignedUpcomingReservations = unassignedUpcomingReservations
-    .Select(ToUnassignedReservationDto)
-    .ToList(),
+                .Select(ToUnassignedReservationDto)
+                .ToList(),
+
             Elements = elements,
             Resources = resourceDtos
         };
 
-        return Ok(result);
+        return result;
     }
 
     private async Task MarkExpiredConfirmedTableReservationsNoShowAsync(
@@ -689,6 +909,171 @@ public sealed class RestaurantFloorPlanController : ApiControllerBase
         }
 
         return $"Sto ima rezervaciju u {reservationTimeText}. Ako ga zauzmete, treba ga osloboditi najkasnije do {mustBeFreeByText}.";
+    }
+
+    private async Task<ActionResult?> EnsureCustomerBusinessAccessAsync(
+    long businessId,
+    CancellationToken cancellationToken)
+    {
+        var userId = TryGetCurrentUserId();
+
+        if (!userId.HasValue)
+            return Unauthorized("Token nije validan.");
+
+        var profile = await DbContext.CustomerProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.AppUserId == userId.Value, cancellationToken);
+
+        if (profile is null)
+            return Forbid();
+
+        var hasAccess = await DbContext.BusinessCustomers
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.BusinessId == businessId &&
+                x.CustomerProfileId == profile.Id &&
+                x.IsActive,
+                cancellationToken);
+
+        if (!hasAccess)
+            return Forbid();
+
+        return null;
+    }
+
+    private static CustomerRestaurantFloorPlanDto ToCustomerFloorPlanDto(
+    RestaurantFloorPlanDto source)
+    {
+        return new CustomerRestaurantFloorPlanDto
+        {
+            BusinessId = source.BusinessId,
+            RestaurantAreaId = source.RestaurantAreaId,
+            AreaName = source.AreaName,
+            CanvasWidth = source.CanvasWidth,
+            CanvasHeight = source.CanvasHeight,
+            BoundaryPointsJson = source.BoundaryPointsJson,
+            StatusAtUtc = source.StatusAtUtc,
+
+            Elements = source.Elements
+                .Select(x => new CustomerRestaurantLayoutElementDto
+                {
+                    Id = x.Id,
+                    ElementType = x.ElementType,
+                    Label = x.Label,
+                    X = x.X,
+                    Y = x.Y,
+                    Width = x.Width,
+                    Height = x.Height,
+                    RotationDeg = x.RotationDeg,
+                    ShapeType = x.ShapeType,
+                    PointsJson = x.PointsJson,
+                    IsObstacle = x.IsObstacle,
+                    DisplayOrder = x.DisplayOrder
+                })
+                .ToList(),
+
+            Tables = source.Resources
+                .Select(ToCustomerTableDto)
+                .ToList()
+        };
+    }
+
+    private static CustomerRestaurantFloorPlanTableDto ToCustomerTableDto(
+        RestaurantFloorPlanResourceDto source)
+    {
+        var nextReservation = source.UpcomingReservations
+            .OrderBy(x => x.ReservationAtUtc)
+            .FirstOrDefault();
+
+        DateTime? reservedFromUtc = null;
+        DateTime? reservedUntilUtc = null;
+
+        if (nextReservation is not null)
+        {
+            reservedFromUtc = nextReservation.ReservationAtUtc;
+
+            var durationMin = nextReservation.ExpectedDurationMin.GetValueOrDefault(120);
+
+            if (durationMin <= 0)
+                durationMin = 120;
+
+            reservedUntilUtc = nextReservation.ReservationAtUtc.AddMinutes(durationMin);
+        }
+
+        var customerStatus = GetCustomerTableStatus(source);
+        var customerStatusText = GetCustomerTableStatusText(customerStatus);
+
+        return new CustomerRestaurantFloorPlanTableDto
+        {
+            ResourceId = source.ResourceId,
+            Name = source.Name,
+            Capacity = source.Capacity,
+
+            Status = customerStatus,
+            StatusText = customerStatusText,
+
+            BusyUntilUtc = source.CurrentTableSessionId.HasValue
+                ? reservedFromUtc
+                : null,
+
+            ReservedFromUtc = source.CurrentTableSessionId.HasValue
+                ? null
+                : reservedFromUtc,
+
+            ReservedUntilUtc = source.CurrentTableSessionId.HasValue
+                ? null
+                : reservedUntilUtc,
+
+            LayoutX = source.LayoutX,
+            LayoutY = source.LayoutY,
+            LayoutWidth = source.LayoutWidth,
+            LayoutHeight = source.LayoutHeight,
+            LayoutRotationDeg = source.LayoutRotationDeg,
+            LayoutShape = source.LayoutShape,
+            LayoutPointsJson = source.LayoutPointsJson
+        };
+    }
+
+    private static int GetCustomerTableStatus(RestaurantFloorPlanResourceDto source)
+    {
+        if (!source.IsActive)
+            return 3;
+
+        if (source.CurrentTableSessionId.HasValue)
+            return 1;
+
+        if (source.UpcomingReservations is not null &&
+            source.UpcomingReservations.Count > 0)
+            return 2;
+
+        return source.StatusText switch
+        {
+            "Sala zauzeta" => 3,
+            "Neaktivno" => 3,
+            _ => 0
+        };
+    }
+
+    private static string GetCustomerTableStatusText(int status)
+    {
+        return status switch
+        {
+            0 => "Slobodan",
+            1 => "Zauzet",
+            2 => "Rezervisan",
+            3 => "Nije dostupan",
+            _ => "Nepoznat status"
+        };
+    }
+
+    private static DateTime EnsureUtc(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
     }
 
     private static string GetAreaStatusText(RestaurantAreaVisualStatusDto status)

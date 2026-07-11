@@ -23,6 +23,10 @@ public sealed class BusinessFeatureSettingsConfiguration : IEntityTypeConfigurat
             .HasDefaultValue(false)
             .IsRequired();
 
+        builder.Property(x => x.HasCustomerSeating)
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(x => x.FoodOrdersEnabled)
             .HasDefaultValue(false)
             .IsRequired();

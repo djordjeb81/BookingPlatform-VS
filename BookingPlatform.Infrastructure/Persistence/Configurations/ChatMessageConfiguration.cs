@@ -21,6 +21,12 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
 
         builder.HasIndex(x => x.ConversationId);
 
+        builder.HasIndex(x => x.RestaurantTableReservationId);
+
+        builder.HasIndex(x => x.RestaurantOrderId);
+
+        builder.HasIndex(x => x.SharedRestaurantOrderId);
+
         builder.HasIndex(x => new { x.ConversationId, x.CreatedAtUtc });
     }
 }

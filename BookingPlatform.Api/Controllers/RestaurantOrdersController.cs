@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using BookingPlatform.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using BookingPlatform.Api.Services;
+using BookingPlatform.Domain.Chat;
 
 
 namespace BookingPlatform.Api.Controllers;
@@ -26,15 +27,18 @@ public sealed class RestaurantOrdersController : ApiControllerBase
     private const int ScheduledOrderMinimumLeadTimeMin = 5;
     private readonly IHubContext<BusinessActivityHub> _businessActivityHub;
     private readonly ISystemAlarmService _systemAlarmService;
+    private readonly IFirebasePushNotificationService _pushNotificationService;
 
     public RestaurantOrdersController(
         BookingDbContext dbContext,
         IHubContext<BusinessActivityHub> businessActivityHub,
-        ISystemAlarmService systemAlarmService)
+        ISystemAlarmService systemAlarmService,
+        IFirebasePushNotificationService pushNotificationService)
         : base(dbContext)
     {
         _businessActivityHub = businessActivityHub;
         _systemAlarmService = systemAlarmService;
+        _pushNotificationService = pushNotificationService;
     }
 
     [HttpGet]
@@ -269,6 +273,8 @@ x.Status == RestaurantOrderStatus.Served ||
                 IsScheduledOrder = order.IsScheduledOrder,
                 DeliveryAddress = order.DeliveryAddress,
                 DeliveryNote = order.DeliveryNote,
+                DeliveryLatitude = order.DeliveryLatitude,
+                DeliveryLongitude = order.DeliveryLongitude,
                 Note = order.Note,
                 CreatedAtUtc = order.CreatedAtUtc,
                 SubmittedAtUtc = order.SubmittedAtUtc,
@@ -502,6 +508,15 @@ x.Status == RestaurantOrderStatus.Served ||
                     activityType = "RestaurantInternalMessage"
                 },
                 cancellationToken);
+
+        await SendRestaurantInternalChatPushAsync(
+            request.BusinessId,
+            null,
+            message.Id,
+            senderUnit.UnitType,
+            new[] { recipientUnit.UnitType },
+            text,
+            cancellationToken);
 
         var saved = await DbContext.RestaurantOrderMessages
             .AsNoTracking()
@@ -1311,8 +1326,8 @@ x.Status == RestaurantOrderStatus.Served ||
 
     [HttpPost("{orderId:long}/kitchen-accept")]
     public async Task<ActionResult<RestaurantOrderDto>> KitchenAccept(
-    [FromRoute] long orderId,
-    CancellationToken cancellationToken)
+        [FromRoute] long orderId,
+        CancellationToken cancellationToken)
     {
         var order = await LoadOrderAsync(orderId, asTracking: true, cancellationToken);
 
@@ -1339,13 +1354,19 @@ x.Status == RestaurantOrderStatus.Served ||
         order.KitchenRejectNote = null;
         order.UpdatedAtUtc = now;
 
+        var isGroupedOrder = IsGroupedRestaurantOrder(order);
+
+        var messageText = isGroupedOrder
+            ? $"Kuhinja je prihvatila grupnu porudžbinu {FormatDisplayOrderNumber(order.DailyOrderNumber)}."
+            : $"Kuhinja je prihvatila porudžbinu {FormatDisplayOrderNumber(order.DailyOrderNumber)}.";
+
         await AddOrderMessageAsync(
             order,
             RestaurantOrderMessageSenderType.Kitchen,
             RestaurantOperationUnitType.Kitchen,
             new[] { RestaurantOperationUnitType.DiningRoom },
             RestaurantOrderMessageType.KitchenAccepted,
-            "Kuhinja je prihvatila porudžbinu.",
+            messageText,
             actionKey: null,
             isActionRequired: false,
             cancellationToken);
@@ -1354,7 +1375,9 @@ x.Status == RestaurantOrderStatus.Served ||
 
         await NotifyRestaurantOrderChangedAsync(
             order,
-            "RestaurantOrderKitchenAccepted",
+            isGroupedOrder
+                ? "GroupedRestaurantOrderKitchenAccepted"
+                : "RestaurantOrderKitchenAccepted",
             cancellationToken);
 
         return Ok(ToDto(order));
@@ -2363,6 +2386,229 @@ new
         }
 
         DbContext.RestaurantOrderMessages.Add(message);
+
+        await SendRestaurantInternalChatPushAsync(
+            order.BusinessId,
+            order.Id,
+            message.Id,
+            senderUnitType,
+            recipientUnitTypes,
+            normalizedText,
+            cancellationToken);
+
+        await SendKitchenMessageToCustomerChatAsync(
+            order,
+            messageType,
+            normalizedText,
+            message.ActionKey,
+            cancellationToken);
+    }
+
+    private async Task SendKitchenMessageToCustomerChatAsync(
+        RestaurantOrder order,
+        RestaurantOrderMessageType messageType,
+        string text,
+        string? actionKey,
+        CancellationToken cancellationToken)
+    {
+        if (order.OrderSource != RestaurantOrderSource.AndroidCustomer)
+            return;
+
+        if (!IsKitchenMessageForCustomer(messageType))
+            return;
+
+        var customerPhone = NormalizeText(order.CustomerPhone, 50);
+
+        if (string.IsNullOrWhiteSpace(customerPhone))
+            return;
+
+        var customerPhoneDigits = NormalizePhoneDigits(customerPhone);
+
+        if (string.IsNullOrWhiteSpace(customerPhoneDigits))
+            return;
+
+        var customerCandidates = await DbContext.BusinessCustomers
+            .AsNoTracking()
+            .Where(x =>
+                x.BusinessId == order.BusinessId &&
+                x.IsActive &&
+                x.AppUserId.HasValue &&
+                x.Phone != null)
+            .Select(x => new
+            {
+                x.AppUserId,
+                x.Phone
+            })
+            .ToListAsync(cancellationToken);
+
+        var appUserId = customerCandidates
+            .FirstOrDefault(x => NormalizePhoneDigits(x.Phone) == customerPhoneDigits)
+            ?.AppUserId;
+
+        if (!appUserId.HasValue)
+            return;
+
+        var businessCustomer = await DbContext.BusinessCustomers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == order.BusinessId &&
+                     x.IsActive &&
+                     x.AppUserId == appUserId.Value,
+                cancellationToken);
+
+        if (businessCustomer is null)
+            return;
+
+        var now = DateTime.UtcNow;
+        var conversation = await DbContext.ChatConversations
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == order.BusinessId &&
+                     x.BusinessCustomerId == businessCustomer.Id &&
+                     x.IsActive,
+                cancellationToken);
+
+        if (conversation is null)
+        {
+            conversation = new ChatConversation
+            {
+                BusinessId = order.BusinessId,
+                BusinessCustomerId = businessCustomer.Id,
+                CustomerProfileId = businessCustomer.CustomerProfileId,
+                AppUserId = businessCustomer.AppUserId,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                IsActive = true
+            };
+
+            DbContext.ChatConversations.Add(conversation);
+            await DbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var chatText = BuildCustomerKitchenChatText(messageType, text, order);
+        var chatActionType = messageType == RestaurantOrderMessageType.KitchenWaitingProposed
+            ? "RestaurantOrderWaitingProposal"
+            : null;
+
+        var chatMessage = new ChatMessage
+        {
+            ConversationId = conversation.Id,
+            SenderType = ChatSenderType.System,
+            SenderUserId = null,
+            Text = chatText,
+            ActionType = chatActionType,
+            RestaurantOrderId = order.Id,
+            IsActionCompleted = false,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        conversation.LastMessageAtUtc = now;
+        conversation.LastMessageText = chatText.Length > 500 ? chatText[..500] : chatText;
+        conversation.UnreadForCustomerCount += 1;
+        conversation.UpdatedAtUtc = now;
+
+        DbContext.ChatMessages.Add(chatMessage);
+
+        var pushBody = BuildCustomerKitchenPushBody(messageType, text);
+
+        await _pushNotificationService.SendToUserAsync(
+            appUserId.Value,
+            "SmartChat",
+            pushBody,
+            new Dictionary<string, string>
+            {
+                ["type"] = "customerChat",
+                ["businessId"] = order.BusinessId.ToString(),
+                ["orderId"] = order.Id.ToString(),
+                ["conversationId"] = conversation.Id.ToString(),
+                ["messageType"] = ((int)messageType).ToString(),
+                ["actionKey"] = actionKey ?? ""
+            },
+            cancellationToken);
+
+        await _businessActivityHub.Clients
+            .Group(BusinessActivityHub.BusinessGroupName(order.BusinessId))
+            .SendAsync(
+                "BusinessActivityChanged",
+                new
+                {
+                    businessId = order.BusinessId,
+                    orderId = order.Id,
+                    conversationId = conversation.Id,
+                    activityType = "RestaurantOrderCustomerChatMessage"
+                },
+                cancellationToken);
+    }
+
+    private static bool IsKitchenMessageForCustomer(RestaurantOrderMessageType messageType)
+    {
+        return messageType is
+            RestaurantOrderMessageType.KitchenAccepted or
+            RestaurantOrderMessageType.KitchenWaitingProposed or
+            RestaurantOrderMessageType.KitchenRejected or
+            RestaurantOrderMessageType.OrderPreparing or
+            RestaurantOrderMessageType.OrderReady;
+    }
+
+    private static bool IsGroupedRestaurantOrder(RestaurantOrder order)
+    {
+        if (!string.IsNullOrWhiteSpace(order.Note) &&
+            order.Note.Contains("Grupna porudžbina", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (order.Guests.Count > 1)
+            return true;
+
+        return false;
+    }
+
+    private static string BuildCustomerKitchenPushBody(
+        RestaurantOrderMessageType messageType,
+        string fallbackText)
+    {
+        return messageType switch
+        {
+            RestaurantOrderMessageType.KitchenAccepted => "Restoran je prihvatio porudžbinu.",
+            RestaurantOrderMessageType.KitchenWaitingProposed => fallbackText,
+            RestaurantOrderMessageType.KitchenRejected => fallbackText,
+            RestaurantOrderMessageType.OrderPreparing => "Porudžbina je u pripremi.",
+            RestaurantOrderMessageType.OrderReady => "Porudžbina je spremna.",
+            _ => fallbackText
+        };
+    }
+
+    private static string BuildCustomerKitchenChatText(
+        RestaurantOrderMessageType messageType,
+        string fallbackText,
+        RestaurantOrder order)
+    {
+        var orderNumberText = FormatDisplayOrderNumber(order.DailyOrderNumber);
+
+        return messageType switch
+        {
+            RestaurantOrderMessageType.KitchenAccepted =>
+                IsGroupedRestaurantOrder(order)
+                    ? $"Grupna porudžbina {orderNumberText} je prihvaćena."
+                    : $"Porudžbina {orderNumberText} je prihvaćena.",
+            RestaurantOrderMessageType.KitchenWaitingProposed =>
+                $"{fallbackText}\n\nDa li prihvatate čekanje?",
+            RestaurantOrderMessageType.KitchenRejected => fallbackText,
+            RestaurantOrderMessageType.OrderPreparing =>
+                $"Porudžbina {orderNumberText} je u pripremi.",
+            RestaurantOrderMessageType.OrderReady =>
+                $"Porudžbina {orderNumberText} je spremna.",
+            _ => fallbackText
+        };
+    }
+
+    private static string NormalizePhoneDigits(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        return new string(value.Where(char.IsDigit).ToArray());
     }
 
     private async Task<long?> GetDefaultOperationUnitIdAsync(
@@ -2764,6 +3010,61 @@ new
             RestaurantOrderMessageType.InternalManualMessage => "Interna poruka",
             _ => "Nepoznat tip poruke"
         };
+    }
+
+    private async Task SendRestaurantInternalChatPushAsync(
+        long businessId,
+        long? orderId,
+        long messageId,
+        RestaurantOperationUnitType? senderUnitType,
+        IReadOnlyCollection<RestaurantOperationUnitType> recipientUnitTypes,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        var body = string.IsNullOrWhiteSpace(text)
+            ? "Stigla je nova poruka u restoranu."
+            : text;
+
+        if (body.Length > 120)
+            body = body[..120] + "...";
+
+        var chatContext = ResolveRestaurantInternalChatContext(senderUnitType, recipientUnitTypes);
+
+        try
+        {
+            await _pushNotificationService.SendToBusinessUsersAsync(
+                businessId,
+                "SmartChat restoran",
+                body,
+                new Dictionary<string, string>
+                {
+                    ["type"] = "restaurantInternalChat",
+                    ["businessId"] = businessId.ToString(),
+                    ["orderId"] = orderId?.ToString() ?? "",
+                    ["messageId"] = messageId > 0 ? messageId.ToString() : "",
+                    ["chatContext"] = chatContext
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Push nije kritičan: poruka je upisana, a Desk dobija SignalR osvežavanje.
+        }
+    }
+
+    private static string ResolveRestaurantInternalChatContext(
+        RestaurantOperationUnitType? senderUnitType,
+        IReadOnlyCollection<RestaurantOperationUnitType> recipientUnitTypes)
+    {
+        if (recipientUnitTypes.Contains(RestaurantOperationUnitType.Kitchen))
+            return "kitchen";
+
+        if (recipientUnitTypes.Contains(RestaurantOperationUnitType.DiningRoom))
+            return "restaurant";
+
+        return senderUnitType == RestaurantOperationUnitType.Kitchen
+            ? "restaurant"
+            : "kitchen";
     }
 
     private static string GetKitchenDecisionStatusText(RestaurantKitchenDecisionStatus status)

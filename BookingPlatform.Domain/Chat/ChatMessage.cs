@@ -18,7 +18,16 @@ public sealed class ChatMessage : AuditableEntity
 
     public long? ChangeRequestId { get; set; }
 
+    public long? RestaurantTableReservationId { get; set; }
+
+    public long? RestaurantOrderId { get; set; }
+
+    public long? SharedRestaurantOrderId { get; set; }
+
+    public bool IsActionCompleted { get; set; }
+
     public DateTime? ReadByBusinessAtUtc { get; set; }
 
     public DateTime? ReadByCustomerAtUtc { get; set; }
+
 }

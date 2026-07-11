@@ -52,13 +52,15 @@ public sealed class FirebasePushNotificationService : IFirebasePushNotificationS
         string title,
         string body,
         Dictionary<string, string>? data = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? excludedAppUserId = null)
     {
         var userIds = await _dbContext.BusinessUserMemberships
             .AsNoTracking()
             .Where(x =>
                 x.BusinessId == businessId &&
-                x.IsActive)
+                x.IsActive &&
+                (!excludedAppUserId.HasValue || x.AppUserId != excludedAppUserId.Value))
             .Select(x => x.AppUserId)
             .Distinct()
             .ToListAsync(cancellationToken);

@@ -91,6 +91,58 @@ public sealed class SystemAlarmService : ISystemAlarmService
         return alarm;
     }
 
+    public async Task<SystemAlarmTrigger> CreateRestaurantOrderNotificationAlarmAsync(
+        long businessId,
+        long restaurantOrderId,
+        string title,
+        string message,
+        string soundKey,
+        string actionKey,
+        CancellationToken cancellationToken)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        var alarm = new SystemAlarmTrigger
+        {
+            BusinessId = businessId,
+            Domain = SystemAlarmDomain.Restaurant,
+            AlarmType = SystemAlarmType.RestaurantNewOrder,
+            Status = SystemAlarmStatus.Pending,
+            TargetType = SystemAlarmTargetType.Business,
+            RelatedOrderId = restaurantOrderId,
+            TriggerAtUtc = nowUtc,
+            CreatedAtUtc = nowUtc,
+            Title = string.IsNullOrWhiteSpace(title)
+                ? "Promena porudžbine"
+                : title.Trim(),
+            Message = string.IsNullOrWhiteSpace(message)
+                ? "Porudžbina je promenjena."
+                : message.Trim(),
+            SoundKey = string.IsNullOrWhiteSpace(soundKey)
+                ? "restaurant_order_changed"
+                : soundKey.Trim(),
+            IsUrgent = true,
+            RequiresUserAction = true,
+            ActionKey = string.IsNullOrWhiteSpace(actionKey)
+                ? "open_restaurant_order"
+                : actionKey.Trim(),
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                businessId,
+                restaurantOrderId
+            })
+        };
+
+        _db.SystemAlarmTriggers.Add(alarm);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await SendRestaurantAlarmPushAsync(
+            alarm,
+            cancellationToken);
+
+        return alarm;
+    }
+
     public async Task<SystemAlarmTrigger> CreateChatUrgentMessageAlarmAsync(
     long businessId,
     long chatConversationId,

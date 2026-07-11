@@ -12,6 +12,9 @@ using BookingPlatform.Domain.Chat;
 using BookingPlatform.Domain.Push;
 using BookingPlatform.Domain.Restaurants;
 using BookingPlatform.Domain.SystemAlarms;
+using BookingPlatform.Domain.Fitness;
+using BookingPlatform.Domain.BusinessActivityNotifications;
+using BookingPlatform.Domain.Platform;
 
 namespace BookingPlatform.Infrastructure.Persistence;
 
@@ -51,6 +54,7 @@ public sealed class BookingDbContext : DbContext
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<ChatConversation> ChatConversations => Set<ChatConversation>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatConversationMember> ChatConversationMembers => Set<ChatConversationMember>();
     public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
     public DbSet<SystemAlarmTrigger> SystemAlarmTriggers => Set<SystemAlarmTrigger>();
     public DbSet<ResourceGroup> ResourceGroups => Set<ResourceGroup>();
@@ -76,12 +80,177 @@ public sealed class BookingDbContext : DbContext
     public DbSet<RestaurantAddonGroup> RestaurantAddonGroups => Set<RestaurantAddonGroup>();
     public DbSet<RestaurantDeliveryZone> RestaurantDeliveryZones => Set<RestaurantDeliveryZone>();
     public DbSet<RestaurantAddon> RestaurantAddons => Set<RestaurantAddon>();
+    public DbSet<SharedRestaurantOrder> SharedRestaurantOrders => Set<SharedRestaurantOrder>();
+    public DbSet<SharedRestaurantOrderItem> SharedRestaurantOrderItems => Set<SharedRestaurantOrderItem>();
+    public DbSet<SharedRestaurantOrderItemOption> SharedRestaurantOrderItemOptions => Set<SharedRestaurantOrderItemOption>();
+    public DbSet<FitnessRoom> FitnessRooms => Set<FitnessRoom>();
+    public DbSet<FitnessClassType> FitnessClassTypes => Set<FitnessClassType>();
+    public DbSet<FitnessSession> FitnessSessions => Set<FitnessSession>();
+    public DbSet<FitnessSessionBooking> FitnessSessionBookings => Set<FitnessSessionBooking>();
+    public DbSet<FitnessSettings> FitnessSettings => Set<FitnessSettings>();
+    public DbSet<FitnessMember> FitnessMembers => Set<FitnessMember>();
+    public DbSet<FitnessMembershipPayment> FitnessMembershipPayments => Set<FitnessMembershipPayment>();
+    public DbSet<FitnessBusinessWorkingHour> FitnessBusinessWorkingHours => Set<FitnessBusinessWorkingHour>();
+    public DbSet<FitnessRoomWorkingHour> FitnessRoomWorkingHours => Set<FitnessRoomWorkingHour>();
+    public DbSet<FitnessSessionTemplate> FitnessSessionTemplates => Set<FitnessSessionTemplate>();
+    public DbSet<FitnessMembershipPlan> FitnessMembershipPlans => Set<FitnessMembershipPlan>();
+    public DbSet<FitnessMemberSessionDebt> FitnessMemberSessionDebts => Set<FitnessMemberSessionDebt>();
+
+    public DbSet<FitnessMemberTrainingPass> FitnessMemberTrainingPasses => Set<FitnessMemberTrainingPass>();
+
+    public DbSet<BusinessActivityNotification> BusinessActivityNotifications => Set<BusinessActivityNotification>();
+
+    public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
+    public DbSet<AdminAccessCode> AdminAccessCodes => Set<AdminAccessCode>();
+    public DbSet<AdminAccessSession> AdminAccessSessions => Set<AdminAccessSession>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(BookingDbContext).Assembly);
+
+        modelBuilder.Entity<PlatformSetting>(entity =>
+        {
+            entity.ToTable("platform_settings");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Key)
+                .IsRequired()
+                .HasMaxLength(120);
+
+            entity.Property(x => x.Value)
+                .IsRequired()
+                .HasMaxLength(2000);
+
+            entity.HasIndex(x => x.Key)
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<AdminAccessCode>(entity =>
+        {
+            entity.ToTable("admin_access_codes");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Email)
+                .IsRequired()
+                .HasMaxLength(320);
+
+            entity.Property(x => x.CodeHash)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(x => x.CreatedFromIp)
+                .HasMaxLength(80);
+
+            entity.HasIndex(x => x.Email);
+
+            entity.HasIndex(x => x.ExpiresAtUtc);
+
+            entity.HasIndex(x => x.UsedAtUtc);
+        });
+
+        modelBuilder.Entity<AdminAccessSession>(entity =>
+        {
+            entity.ToTable("admin_access_sessions");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Email)
+                .IsRequired()
+                .HasMaxLength(320);
+
+            entity.Property(x => x.TokenHash)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(x => x.CreatedFromIp)
+                .HasMaxLength(80);
+
+            entity.HasIndex(x => x.Email);
+
+            entity.HasIndex(x => x.TokenHash)
+                .IsUnique();
+
+            entity.HasIndex(x => x.ExpiresAtUtc);
+
+            entity.HasIndex(x => x.RevokedAtUtc);
+        });
+
+        modelBuilder.Entity<BusinessActivityNotification>(entity =>
+        {
+            entity.ToTable("business_activity_notifications");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.RecipientType)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(x => x.RecipientKey)
+                .IsRequired()
+                .HasMaxLength(120);
+
+            entity.Property(x => x.Domain)
+                .IsRequired()
+                .HasMaxLength(80);
+
+            entity.Property(x => x.Kind)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(x => x.ActivityKey)
+                .IsRequired()
+                .HasMaxLength(220);
+
+            entity.Property(x => x.Title)
+                .IsRequired()
+                .HasMaxLength(250);
+
+            entity.Property(x => x.MainText)
+                .IsRequired()
+                .HasMaxLength(500);
+
+            entity.Property(x => x.PreviewText)
+                .IsRequired()
+                .HasMaxLength(1000);
+
+            entity.Property(x => x.CustomerName)
+                .HasMaxLength(200);
+
+            entity.Property(x => x.CustomerPhone)
+                .HasMaxLength(80);
+
+            entity.Property(x => x.PayloadJson)
+                .HasColumnType("jsonb");
+
+            entity.HasIndex(x => x.BusinessId);
+
+            entity.HasIndex(x => new { x.BusinessId, x.RecipientKey });
+
+            entity.HasIndex(x => new { x.BusinessId, x.RecipientKey, x.IsSeen });
+
+            entity.HasIndex(x => new { x.BusinessId, x.RecipientKey, x.IsResolved });
+
+            entity.HasIndex(x => new { x.BusinessId, x.RecipientKey, x.SnoozedUntilUtc });
+
+            entity.HasIndex(x => new { x.BusinessId, x.RecipientKey, x.SortAtUtc });
+
+            entity.HasIndex(x => new
+            {
+                x.BusinessId,
+                x.RecipientKey,
+                x.ActivityKey
+            })
+            .IsUnique();
+
+            entity.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         modelBuilder.Entity<ServiceStepResourceRequirement>(entity =>
         {

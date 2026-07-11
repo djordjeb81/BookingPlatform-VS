@@ -97,11 +97,11 @@ public sealed class DeviceLicenseService : IDeviceLicenseService
     }
 
     public async Task<RefreshLicenseResult> RefreshAsync(
-        long appUserId,
-        string hwidHash,
-        string computerName,
-        string programVersion,
-        CancellationToken cancellationToken)
+    long appUserId,
+    string hwidHash,
+    string computerName,
+    string programVersion,
+    CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(hwidHash))
         {
@@ -168,10 +168,17 @@ public sealed class DeviceLicenseService : IDeviceLicenseService
             };
         }
 
+        var leaseValidUntilUtc = now.AddDays(LicenseLeaseDays);
+
+        if (!device.ValidUntilUtc.HasValue ||
+            device.ValidUntilUtc.Value < leaseValidUntilUtc)
+        {
+            device.ValidUntilUtc = leaseValidUntilUtc;
+        }
+
         device.LicenseToken = Guid.NewGuid().ToString("N");
         device.LicenseTokenIssuedAtUtc = now;
         device.LastLicenseRefreshAtUtc = now;
-        device.ValidUntilUtc = now.AddDays(LicenseLeaseDays);
         device.UpdatedAtUtc = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -186,7 +193,7 @@ public sealed class DeviceLicenseService : IDeviceLicenseService
             ValidUntilUtc = device.ValidUntilUtc,
             LastSeenAtUtc = device.LastSeenAtUtc,
             LastLicenseRefreshAtUtc = device.LastLicenseRefreshAtUtc,
-            Message = "Licenca je uspešno osvežena na 5 dana."
+            Message = $"Licenca je uspešno osvežena. Važi do {device.ValidUntilUtc?.ToLocalTime():dd.MM.yyyy HH:mm}."
         };
     }
 

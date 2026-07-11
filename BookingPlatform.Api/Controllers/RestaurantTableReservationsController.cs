@@ -23,12 +23,16 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
 
     private readonly ISystemAlarmService _systemAlarmService;
 
+    private readonly IChatSystemMessageService _chatSystemMessageService;
+
     public RestaurantTableReservationsController(
         BookingDbContext dbContext,
-        ISystemAlarmService systemAlarmService)
+        ISystemAlarmService systemAlarmService,
+        IChatSystemMessageService chatSystemMessageService)
         : base(dbContext)
     {
         _systemAlarmService = systemAlarmService;
+        _chatSystemMessageService = chatSystemMessageService;
     }
 
     [HttpGet]
@@ -613,6 +617,15 @@ public sealed class RestaurantTableReservationsController : ApiControllerBase
         await DbContext.SaveChangesAsync(cancellationToken);
 
         await CreateTableShouldBeFreeAlarmIfNeededAsync(entity, cancellationToken);
+
+        if (entity.BusinessCustomerId.HasValue ||
+    entity.CustomerProfileId.HasValue ||
+    entity.AppUserId.HasValue)
+        {
+            await _chatSystemMessageService.SendRestaurantTableReservationApprovedOrderPromptToCustomerAsync(
+                entity,
+                cancellationToken);
+        }
 
         var dtoEntity = await DbContext.RestaurantTableReservations
             .AsNoTracking()

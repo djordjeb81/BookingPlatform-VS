@@ -14,5 +14,6 @@ public interface IFirebasePushNotificationService
         string title,
         string body,
         Dictionary<string, string>? data = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        long? excludedAppUserId = null);
 }

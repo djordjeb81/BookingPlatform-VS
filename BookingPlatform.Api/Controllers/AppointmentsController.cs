@@ -2,6 +2,7 @@
 using BookingPlatform.Api.Services;
 using BookingPlatform.Contracts.Appointments;
 using BookingPlatform.Domain.Appointments;
+using BookingPlatform.Domain.BusinessActivityNotifications;
 using BookingPlatform.Domain.Services;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -244,6 +245,13 @@ public sealed class AppointmentsController : ControllerBase
         };
 
         _dbContext.AppointmentChangeRequests.Add(changeRequest);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await UpsertSalonAppointmentRequestNotificationAsync(
+            appointment,
+            changeRequest,
+            cancellationToken);
+
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         if (appointment.PrimaryStaffMemberId.HasValue)
@@ -515,6 +523,12 @@ public sealed class AppointmentsController : ControllerBase
             pendingRequest.UpdatedAtUtc = now;
         }
 
+        await ResolveSalonAppointmentRequestNotificationAsync(
+            appointment.BusinessId,
+            appointment.Id,
+            now,
+            cancellationToken);
+
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         await AddAuditLogAsync(
@@ -620,6 +634,12 @@ public sealed class AppointmentsController : ControllerBase
             pendingRequest.RespondedAtUtc = now;
             pendingRequest.UpdatedAtUtc = now;
         }
+
+        await ResolveSalonAppointmentRequestNotificationAsync(
+            appointment.BusinessId,
+            appointment.Id,
+            now,
+            cancellationToken);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -1009,6 +1029,11 @@ public sealed class AppointmentsController : ControllerBase
                     actionType = "NewBookingRequestExpired";
                     message = "Zahtev za termin je istekao jer nije bilo odgovora na vreme.";
                     newValuesJson = $"Status={appointment.Status}";
+                    await ResolveSalonAppointmentRequestNotificationAsync(
+                        appointment.BusinessId,
+                        appointment.Id,
+                        now,
+                        cancellationToken);
                     break;
 
                 case AppointmentChangeRequestType.CounterProposal:
@@ -1018,6 +1043,11 @@ public sealed class AppointmentsController : ControllerBase
                     actionType = "CounterProposalExpired";
                     message = "Predlog novog termina je istekao jer nije bilo odgovora na vreme.";
                     newValuesJson = $"Status={appointment.Status}";
+                    await ResolveSalonAppointmentRequestNotificationAsync(
+                        appointment.BusinessId,
+                        appointment.Id,
+                        now,
+                        cancellationToken);
                     break;
 
                 case AppointmentChangeRequestType.DelayProposal:
@@ -1046,6 +1076,160 @@ public sealed class AppointmentsController : ControllerBase
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpsertSalonAppointmentRequestNotificationAsync(
+        Appointment appointment,
+        AppointmentChangeRequest changeRequest,
+        CancellationToken cancellationToken)
+    {
+        var activityKey = SalonAppointmentRequestNotificationKey(appointment.Id);
+        var nowUtc = DateTime.UtcNow;
+
+        var notification = await _dbContext.BusinessActivityNotifications
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == appointment.BusinessId &&
+                     x.RecipientKey == "business" &&
+                     x.ActivityKey == activityKey,
+                cancellationToken);
+
+        if (notification is null)
+        {
+            notification = new BusinessActivityNotification
+            {
+                BusinessId = appointment.BusinessId,
+                RecipientType = BusinessActivityNotificationRecipients.Business,
+                RecipientKey = "business",
+                Domain = BusinessActivityNotificationDomains.Salon,
+                Kind = BusinessActivityNotificationKinds.AppointmentRequest,
+                ActivityKey = activityKey,
+                CreatedAtUtc = nowUtc
+            };
+
+            _dbContext.BusinessActivityNotifications.Add(notification);
+        }
+
+        var businessCustomer = appointment.BusinessCustomerId.HasValue
+            ? await _dbContext.BusinessCustomers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.Id == appointment.BusinessCustomerId.Value,
+                    cancellationToken)
+            : null;
+
+        var serviceName = await _dbContext.Services
+            .AsNoTracking()
+            .Where(x => x.Id == appointment.ServiceId)
+            .Select(x => x.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var staffName = appointment.PrimaryStaffMemberId.HasValue
+            ? await _dbContext.StaffMembers
+                .AsNoTracking()
+                .Where(x => x.Id == appointment.PrimaryStaffMemberId.Value)
+                .Select(x => x.DisplayName)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var customerName = NormalizeSalonNotificationText(
+            businessCustomer?.FullName,
+            appointment.CustomerName,
+            "Klijent");
+
+        notification.RecipientType = BusinessActivityNotificationRecipients.Business;
+        notification.RecipientKey = "business";
+        notification.Domain = BusinessActivityNotificationDomains.Salon;
+        notification.Kind = BusinessActivityNotificationKinds.AppointmentRequest;
+        notification.Title = "Novi zahtev za termin";
+        notification.MainText = customerName;
+        notification.PreviewText = BuildSalonAppointmentRequestPreview(
+            appointment,
+            serviceName,
+            staffName);
+        notification.Priority = 100;
+        notification.SortAtUtc = appointment.CreatedAtUtc == default
+            ? nowUtc
+            : appointment.CreatedAtUtc;
+        notification.AppointmentId = appointment.Id;
+        notification.ChangeRequestId = changeRequest.Id;
+        notification.CustomerProfileId = businessCustomer?.CustomerProfileId;
+        notification.BusinessCustomerId = appointment.BusinessCustomerId;
+        notification.CustomerName = customerName;
+        notification.CustomerPhone = NormalizeSalonNotificationText(
+            businessCustomer?.Phone,
+            appointment.CustomerPhone,
+            null);
+        notification.IsSeen = false;
+        notification.SeenAtUtc = null;
+        notification.SeenByUserId = null;
+        notification.IsResolved = false;
+        notification.ResolvedAtUtc = null;
+        notification.ResolvedByUserId = null;
+        notification.SnoozedUntilUtc = null;
+        notification.SnoozedByUserId = null;
+        notification.UpdatedAtUtc = nowUtc;
+    }
+
+    private async Task ResolveSalonAppointmentRequestNotificationAsync(
+        long businessId,
+        long appointmentId,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var activityKey = SalonAppointmentRequestNotificationKey(appointmentId);
+
+        var notification = await _dbContext.BusinessActivityNotifications
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == businessId &&
+                     x.RecipientKey == "business" &&
+                     x.ActivityKey == activityKey,
+                cancellationToken);
+
+        if (notification is null)
+            return;
+
+        notification.IsSeen = true;
+        notification.SeenAtUtc ??= nowUtc;
+        notification.IsResolved = true;
+        notification.ResolvedAtUtc = nowUtc;
+        notification.SnoozedUntilUtc = null;
+        notification.UpdatedAtUtc = nowUtc;
+    }
+
+    private static string BuildSalonAppointmentRequestPreview(
+        Appointment appointment,
+        string? serviceName,
+        string? staffName)
+    {
+        var parts = new List<string>
+        {
+            string.IsNullOrWhiteSpace(serviceName) ? $"Usluga #{appointment.ServiceId}" : serviceName.Trim(),
+            appointment.StartAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+        };
+
+        if (!string.IsNullOrWhiteSpace(staffName))
+            parts.Add(staffName.Trim());
+
+        return string.Join(" | ", parts);
+    }
+
+    private static string NormalizeSalonNotificationText(
+        string? primary,
+        string? secondary,
+        string? fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(primary))
+            return primary.Trim();
+
+        if (!string.IsNullOrWhiteSpace(secondary))
+            return secondary.Trim();
+
+        return fallback ?? string.Empty;
+    }
+
+    private static string SalonAppointmentRequestNotificationKey(long appointmentId)
+    {
+        return $"salon.appointment.request:{appointmentId}";
     }
 
 

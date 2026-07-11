@@ -14,5 +14,8 @@ public enum BusinessType
     Accommodation = 9,
     Hotel = 10,
     Motel = 11,
+
+    Gym = 12,
+
     Other = 999
 }

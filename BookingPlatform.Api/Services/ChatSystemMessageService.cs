@@ -1,9 +1,11 @@
 ﻿using BookingPlatform.Api.Hubs;
 using BookingPlatform.Domain.Appointments;
 using BookingPlatform.Domain.Chat;
+using BookingPlatform.Domain.Restaurants;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using BookingPlatform.Domain.Resources;
 
 namespace BookingPlatform.Api.Services;
 
@@ -375,6 +377,129 @@ public sealed class ChatSystemMessageService : IChatSystemMessageService
             "AppointmentInfo",
             changeRequest.Id,
             cancellationToken);
+    }
+
+    public async Task SendRestaurantTableReservationApprovedOrderPromptToCustomerAsync(
+    RestaurantTableReservation reservation,
+    CancellationToken cancellationToken)
+    {
+        if (!reservation.BusinessCustomerId.HasValue)
+            return;
+
+        var customer = await _dbContext.BusinessCustomers
+            .FirstOrDefaultAsync(
+                x => x.Id == reservation.BusinessCustomerId.Value &&
+                     x.BusinessId == reservation.BusinessId &&
+                     x.IsActive,
+                cancellationToken);
+
+        if (customer is null)
+            return;
+
+        var tableName = reservation.TableResource?.Name;
+
+        if (string.IsNullOrWhiteSpace(tableName) && reservation.TableResourceId.HasValue)
+        {
+            tableName = await _dbContext.Resources
+                .AsNoTracking()
+                .Where(x => x.Id == reservation.TableResourceId.Value)
+                .Select(x => x.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var tableText = string.IsNullOrWhiteSpace(tableName)
+            ? "sto"
+            : tableName.Trim();
+
+        var text =
+            "Vaš zahtev za sto je odobren.\n\n" +
+            $"Termin: {FormatDateTime(reservation.ReservationAtUtc)}\n" +
+            $"Sto: {tableText}\n" +
+            $"Broj osoba: {reservation.PartySize}\n\n" +
+            "Želite li da naručite hranu unapred?";
+
+        var pushTitle = "Zahtev za sto je odobren.";
+        var pushType = "restaurantTableReservationApproved";
+        var actionType = "restaurant_table_reservation_approved_order_prompt";
+
+        var now = DateTime.UtcNow;
+
+        var conversation = await _dbContext.ChatConversations
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == reservation.BusinessId &&
+                     x.BusinessCustomerId == customer.Id &&
+                     x.IsActive,
+                cancellationToken);
+
+        if (conversation is null)
+        {
+            conversation = new ChatConversation
+            {
+                BusinessId = reservation.BusinessId,
+                BusinessCustomerId = customer.Id,
+                CustomerProfileId = customer.CustomerProfileId,
+                AppUserId = customer.AppUserId,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                IsActive = true
+            };
+
+            _dbContext.ChatConversations.Add(conversation);
+        }
+
+        var message = new ChatMessage
+        {
+            ConversationId = conversation.Id,
+            SenderType = ChatSenderType.System,
+            SenderUserId = null,
+            Text = text,
+            ActionType = actionType,
+            AppointmentId = null,
+            ChangeRequestId = null,
+            RestaurantTableReservationId = reservation.Id,
+            RestaurantOrderId = null,
+            IsActionCompleted = false,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        conversation.LastMessageAtUtc = now;
+        conversation.LastMessageText = text.Length > 500 ? text[..500] : text;
+        conversation.UnreadForCustomerCount += 1;
+        conversation.UpdatedAtUtc = now;
+
+        _dbContext.ChatMessages.Add(message);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (conversation.AppUserId.HasValue)
+        {
+            await _pushNotificationService.SendToUserAsync(
+                conversation.AppUserId.Value,
+                "SmartChat",
+                pushTitle,
+                new Dictionary<string, string>
+                {
+                    ["type"] = pushType,
+                    ["businessId"] = reservation.BusinessId.ToString(),
+                    ["restaurantTableReservationId"] = reservation.Id.ToString(),
+                    ["conversationId"] = conversation.Id.ToString()
+                },
+                cancellationToken);
+        }
+
+        await _businessActivityHub.Clients
+            .Group(BusinessActivityHub.BusinessGroupName(reservation.BusinessId))
+            .SendAsync(
+                "BusinessActivityChanged",
+                new
+                {
+                    businessId = reservation.BusinessId,
+                    restaurantTableReservationId = reservation.Id,
+                    conversationId = conversation.Id,
+                    activityType = pushType
+                },
+                cancellationToken);
     }
 
     private async Task SendSystemMessageToCustomerAsync(

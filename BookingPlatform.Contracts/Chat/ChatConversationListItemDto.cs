@@ -4,6 +4,8 @@ public sealed class ChatConversationListItemDto
 {
     public long Id { get; set; }
 
+    public string ConversationTargetType { get; set; } = "Business";
+
     public long BusinessId { get; set; }
 
     public long? BusinessCustomerId { get; set; }
@@ -11,6 +13,7 @@ public sealed class ChatConversationListItemDto
     public long? AppUserId { get; set; }
 
     public string CustomerName { get; set; } = "";
+    public string? CustomerDisplayName { get; set; }
     public string? CustomerPhone { get; set; }
     public string? CustomerEmail { get; set; }
 

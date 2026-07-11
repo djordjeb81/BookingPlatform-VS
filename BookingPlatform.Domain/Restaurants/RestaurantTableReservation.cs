@@ -1,6 +1,8 @@
 ﻿using BookingPlatform.Domain.Businesses;
 using BookingPlatform.Domain.Common;
 using BookingPlatform.Domain.Resources;
+using BookingPlatform.Domain.Auth;
+using BookingPlatform.Domain.Customers;
 
 namespace BookingPlatform.Domain.Restaurants;
 
@@ -19,6 +21,18 @@ public sealed class RestaurantTableReservation : AuditableEntity
     public long? TableResourceId { get; set; }
 
     public Resource? TableResource { get; set; }
+
+    public long? CustomerProfileId { get; set; }
+
+    public CustomerProfile? CustomerProfile { get; set; }
+
+    public long? AppUserId { get; set; }
+
+    public AppUser? AppUser { get; set; }
+
+    public long? BusinessCustomerId { get; set; }
+
+    public BusinessCustomer? BusinessCustomer { get; set; }
 
     public int PartySize { get; set; }
 

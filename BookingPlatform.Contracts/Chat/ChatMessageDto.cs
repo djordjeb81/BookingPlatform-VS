@@ -18,6 +18,14 @@ public sealed class ChatMessageDto
 
     public long? ChangeRequestId { get; set; }
 
+    public long? RestaurantTableReservationId { get; set; }
+
+    public long? RestaurantOrderId { get; set; }
+
+    public long? SharedRestaurantOrderId { get; set; }
+
+    public bool IsActionCompleted { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 
     public DateTime? ReadByBusinessAtUtc { get; set; }

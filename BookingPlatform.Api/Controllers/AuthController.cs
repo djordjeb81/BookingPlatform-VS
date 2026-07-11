@@ -363,6 +363,12 @@ public sealed class AuthController : ControllerBase
         if (request.SlotIntervalMin <= 0)
             return BadRequest("Razmak između početaka termina mora biti veći od 0 minuta.");
 
+        if (!Enum.IsDefined(typeof(BusinessType), request.BusinessType))
+            return BadRequest("Izabrana vrsta biznisa nije ispravna.");
+
+        if (!Enum.IsDefined(typeof(BookingMode), request.BookingMode))
+            return BadRequest("Izabrani režim rada nije ispravan.");
+
         var exists = await _dbContext.AppUsers
             .AsNoTracking()
             .AnyAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
@@ -386,11 +392,14 @@ public sealed class AuthController : ControllerBase
         _dbContext.AppUsers.Add(user);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        var bookingMode = (BookingMode)request.BookingMode;
+
         var business = new Business
         {
             Name = businessName,
             BusinessType = (BusinessType)request.BusinessType,
-            BookingMode = (BookingMode)request.BookingMode,
+            BookingMode = bookingMode,
+            FeatureSettings = CreateDefaultFeatureSettings(bookingMode),
             Description = request.Description?.Trim(),
             Phone = request.Phone?.Trim(),
             Email = request.BusinessEmail?.Trim(),
@@ -587,5 +596,67 @@ public sealed class AuthController : ControllerBase
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static BusinessFeatureSettings CreateDefaultFeatureSettings(BookingMode bookingMode)
+    {
+        var settings = new BusinessFeatureSettings();
+
+        switch (bookingMode)
+        {
+            case BookingMode.Hospitality:
+                settings.ServiceAppointmentsEnabled = false;
+                settings.TableReservationsEnabled = true;
+                settings.HasCustomerSeating = true;
+                settings.FoodOrdersEnabled = true;
+                settings.DrinkOrdersEnabled = true;
+                settings.TakeawayOrdersEnabled = true;
+                settings.DeliveryOrdersEnabled = false;
+                settings.EventHallReservationsEnabled = false;
+                settings.AccommodationEnabled = false;
+                settings.ReviewsEnabled = true;
+                break;
+
+            case BookingMode.Accommodation:
+                settings.ServiceAppointmentsEnabled = false;
+                settings.TableReservationsEnabled = false;
+                settings.HasCustomerSeating = false;
+                settings.FoodOrdersEnabled = false;
+                settings.DrinkOrdersEnabled = false;
+                settings.TakeawayOrdersEnabled = false;
+                settings.DeliveryOrdersEnabled = false;
+                settings.EventHallReservationsEnabled = false;
+                settings.AccommodationEnabled = true;
+                settings.ReviewsEnabled = true;
+                break;
+
+            case BookingMode.Fitness:
+                settings.ServiceAppointmentsEnabled = false;
+                settings.TableReservationsEnabled = false;
+                settings.HasCustomerSeating = false;
+                settings.FoodOrdersEnabled = false;
+                settings.DrinkOrdersEnabled = false;
+                settings.TakeawayOrdersEnabled = false;
+                settings.DeliveryOrdersEnabled = false;
+                settings.EventHallReservationsEnabled = false;
+                settings.AccommodationEnabled = false;
+                settings.ReviewsEnabled = true;
+                break;
+
+            default:
+                settings.ServiceAppointmentsEnabled = true;
+                settings.TableReservationsEnabled = false;
+                settings.HasCustomerSeating = false;
+                settings.FoodOrdersEnabled = false;
+                settings.DrinkOrdersEnabled = false;
+                settings.TakeawayOrdersEnabled = false;
+                settings.DeliveryOrdersEnabled = false;
+                settings.EventHallReservationsEnabled = false;
+                settings.AccommodationEnabled = false;
+                settings.ReviewsEnabled = true;
+                break;
+        }
+
+        return settings;
     }
 }

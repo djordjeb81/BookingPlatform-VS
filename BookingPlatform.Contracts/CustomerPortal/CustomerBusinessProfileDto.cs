@@ -37,4 +37,17 @@ public sealed class CustomerBusinessProfileDto
     public long? BusinessCustomerId { get; set; }
 
     public List<string> Services { get; set; } = new();
+
+    public List<CustomerBusinessWorkingHourDto> WorkingHours { get; set; } = new();
+}
+
+public sealed class CustomerBusinessWorkingHourDto
+{
+    public int DayOfWeek { get; set; }
+
+    public string StartTime { get; set; } = string.Empty;
+
+    public string EndTime { get; set; } = string.Empty;
+
+    public bool IsClosed { get; set; }
 }

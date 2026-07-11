@@ -1,14 +1,15 @@
-using System.Text;
+using BookingPlatform.Api.Hubs;
+using BookingPlatform.Api.Options;
 using BookingPlatform.Api.Services;
+using BookingPlatform.Api.Setup;
+using BookingPlatform.Contracts.Common;
 using BookingPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using BookingPlatform.Api.Setup;
-using BookingPlatform.Contracts.Common;
+using System.Text;
 using System.Text.Json;
-using BookingPlatform.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -68,6 +69,12 @@ builder.Services.AddDbContext<BookingDbContext>(options =>
 builder.Services.AddScoped<IAppointmentSchedulingService, AppointmentSchedulingService>();
 builder.Services.AddScoped<IAppointmentWorkflowService, AppointmentWorkflowService>();
 builder.Services.AddScoped<IDeviceLicenseService, DeviceLicenseService>();
+builder.Services.Configure<SmtpOptions>(
+    builder.Configuration.GetSection("Smtp"));
+
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<PlatformSettingsService>();
+builder.Services.AddScoped<AdminAccessService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"]
              ?? throw new InvalidOperationException("Jwt:Key nije podešen.");

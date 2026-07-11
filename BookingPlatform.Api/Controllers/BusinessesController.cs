@@ -311,6 +311,7 @@ public sealed class BusinessesController : ApiControllerBase
         settings.DrinkOrdersEnabled = effectiveDto.DrinkOrdersEnabled;
         settings.TakeawayOrdersEnabled = effectiveDto.TakeawayOrdersEnabled;
         settings.DeliveryOrdersEnabled = effectiveDto.DeliveryOrdersEnabled;
+        settings.HasCustomerSeating = effectiveDto.HasCustomerSeating;
         settings.EventHallReservationsEnabled = effectiveDto.EventHallReservationsEnabled;
         settings.AccommodationEnabled = effectiveDto.AccommodationEnabled;
         settings.ReviewsEnabled = effectiveDto.ReviewsEnabled;
@@ -342,8 +343,8 @@ public sealed class BusinessesController : ApiControllerBase
     }
 
     private static BusinessFeatureSettingsDto ToFeatureSettingsDto(
-        BusinessFeatureSettings? settings,
-        BookingMode bookingMode)
+      BusinessFeatureSettings? settings,
+      BookingMode bookingMode)
     {
         if (settings is null)
             return CreateDefaultFeatureSettingsDto(bookingMode);
@@ -356,6 +357,7 @@ public sealed class BusinessesController : ApiControllerBase
             DrinkOrdersEnabled = settings.DrinkOrdersEnabled,
             TakeawayOrdersEnabled = settings.TakeawayOrdersEnabled,
             DeliveryOrdersEnabled = settings.DeliveryOrdersEnabled,
+            HasCustomerSeating = settings.HasCustomerSeating,
             EventHallReservationsEnabled = settings.EventHallReservationsEnabled,
             AccommodationEnabled = settings.AccommodationEnabled,
             ReviewsEnabled = settings.ReviewsEnabled
@@ -372,8 +374,9 @@ public sealed class BusinessesController : ApiControllerBase
                 TableReservationsEnabled = true,
                 FoodOrdersEnabled = true,
                 DrinkOrdersEnabled = true,
-                TakeawayOrdersEnabled = false,
+                TakeawayOrdersEnabled = true,
                 DeliveryOrdersEnabled = false,
+                HasCustomerSeating = true,
                 EventHallReservationsEnabled = false,
                 AccommodationEnabled = false,
                 ReviewsEnabled = true
@@ -387,8 +390,23 @@ public sealed class BusinessesController : ApiControllerBase
                 DrinkOrdersEnabled = false,
                 TakeawayOrdersEnabled = false,
                 DeliveryOrdersEnabled = false,
+                HasCustomerSeating = false,
                 EventHallReservationsEnabled = false,
                 AccommodationEnabled = true,
+                ReviewsEnabled = true
+            },
+
+            BookingMode.Fitness => new BusinessFeatureSettingsDto
+            {
+                ServiceAppointmentsEnabled = false,
+                TableReservationsEnabled = false,
+                FoodOrdersEnabled = false,
+                DrinkOrdersEnabled = false,
+                TakeawayOrdersEnabled = false,
+                DeliveryOrdersEnabled = false,
+                HasCustomerSeating = false,
+                EventHallReservationsEnabled = false,
+                AccommodationEnabled = false,
                 ReviewsEnabled = true
             },
 
@@ -400,6 +418,7 @@ public sealed class BusinessesController : ApiControllerBase
                 DrinkOrdersEnabled = false,
                 TakeawayOrdersEnabled = false,
                 DeliveryOrdersEnabled = false,
+                HasCustomerSeating = false,
                 EventHallReservationsEnabled = false,
                 AccommodationEnabled = false,
                 ReviewsEnabled = true

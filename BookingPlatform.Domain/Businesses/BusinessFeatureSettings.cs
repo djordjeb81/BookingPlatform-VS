@@ -10,6 +10,7 @@ public sealed class BusinessFeatureSettings
     public bool ServiceAppointmentsEnabled { get; set; } = true;
 
     public bool TableReservationsEnabled { get; set; }
+    public bool HasCustomerSeating { get; set; }
     public bool FoodOrdersEnabled { get; set; }
     public bool DrinkOrdersEnabled { get; set; }
     public bool TakeawayOrdersEnabled { get; set; }

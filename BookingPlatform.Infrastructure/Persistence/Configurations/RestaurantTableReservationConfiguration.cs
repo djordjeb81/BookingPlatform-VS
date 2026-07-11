@@ -49,6 +49,12 @@ public sealed class RestaurantTableReservationConfiguration : IEntityTypeConfigu
 
         builder.HasIndex(x => x.Status);
 
+        builder.HasIndex(x => x.CustomerProfileId);
+
+        builder.HasIndex(x => x.AppUserId);
+
+        builder.HasIndex(x => x.BusinessCustomerId);
+
         builder.HasIndex(x => new
         {
             x.BusinessId,
@@ -69,6 +75,21 @@ public sealed class RestaurantTableReservationConfiguration : IEntityTypeConfigu
         builder.HasOne(x => x.TableResource)
             .WithMany()
             .HasForeignKey(x => x.TableResourceId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.CustomerProfile)
+    .WithMany()
+    .HasForeignKey(x => x.CustomerProfileId)
+    .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.AppUser)
+            .WithMany()
+            .HasForeignKey(x => x.AppUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.BusinessCustomer)
+            .WithMany()
+            .HasForeignKey(x => x.BusinessCustomerId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(x => x.CreatedTableSession)

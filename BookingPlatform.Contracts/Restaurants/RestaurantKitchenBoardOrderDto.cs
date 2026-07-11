@@ -67,6 +67,10 @@ public sealed class RestaurantKitchenBoardOrderDto
 
     public string? DeliveryNote { get; set; }
 
+    public double? DeliveryLatitude { get; set; }
+
+    public double? DeliveryLongitude { get; set; }
+
     public string? Note { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }

@@ -421,6 +421,181 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("email_verification_codes", (string)null);
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.BusinessActivityNotifications.BusinessActivityNotification", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActivityKey")
+                        .IsRequired()
+                        .HasMaxLength(220)
+                        .HasColumnType("character varying(220)");
+
+                    b.Property<long?>("AppointmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ChangeRequestId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ChatMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ConversationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<long?>("FitnessMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessMemberSessionDebtId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessSessionBookingId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsSeen")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("LastReminderAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MainText")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("PreviewText")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("RecipientAppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RecipientCustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RecipientKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<long?>("RecipientOperationUnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RecipientStaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RecipientType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("ResolvedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RestaurantAreaReservationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RestaurantOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RestaurantTableReservationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("SeenByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SnoozedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SnoozedUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("SortAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("SystemAlarmTriggerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "RecipientKey");
+
+                    b.HasIndex("BusinessId", "RecipientKey", "ActivityKey")
+                        .IsUnique();
+
+                    b.HasIndex("BusinessId", "RecipientKey", "IsResolved");
+
+                    b.HasIndex("BusinessId", "RecipientKey", "IsSeen");
+
+                    b.HasIndex("BusinessId", "RecipientKey", "SnoozedUntilUtc");
+
+                    b.HasIndex("BusinessId", "RecipientKey", "SortAtUtc");
+
+                    b.ToTable("business_activity_notifications", (string)null);
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Businesses.Business", b =>
                 {
                     b.Property<long>("Id")
@@ -540,6 +715,11 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("HasCustomerSeating")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("ReviewsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -627,6 +807,56 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.ToTable("chat_conversations", (string)null);
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatConversationMember", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("CreatedByAppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("DisplayNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("CustomerProfileId");
+
+                    b.HasIndex("ConversationId", "CustomerProfileId")
+                        .IsUnique();
+
+                    b.ToTable("chat_conversation_members", (string)null);
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -651,16 +881,28 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsActionCompleted")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("ReadByBusinessAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("ReadByCustomerAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long?>("RestaurantOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RestaurantTableReservationId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("SenderType")
                         .HasColumnType("integer");
 
                     b.Property<long?>("SenderUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SharedRestaurantOrderId")
                         .HasColumnType("bigint");
 
                     b.Property<string>("Text")
@@ -678,6 +920,12 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("ChangeRequestId");
 
                     b.HasIndex("ConversationId");
+
+                    b.HasIndex("RestaurantOrderId");
+
+                    b.HasIndex("RestaurantTableReservationId");
+
+                    b.HasIndex("SharedRestaurantOrderId");
 
                     b.HasIndex("ConversationId", "CreatedAtUtc");
 
@@ -762,11 +1010,55 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<bool>("AllowChatDiscovery")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("AllowUserSearch")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<long?>("AppUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DefaultDeliveryAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DefaultDeliveryApartment")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("DefaultDeliveryCity")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<double?>("DefaultDeliveryLatitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("DefaultDeliveryLongitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("DefaultDeliveryNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DefaultDeliveryStreet")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("DefaultDeliveryStreetNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
@@ -776,6 +1068,10 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Nickname")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("Phone")
                         .HasMaxLength(50)
@@ -789,6 +1085,865 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("AppUserId");
 
                     b.ToTable("customer_profiles", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessBusinessWorkingHour", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<TimeOnly?>("CloseTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsClosed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<TimeOnly?>("OpenTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "DayOfWeek")
+                        .IsUnique();
+
+                    b.ToTable("fitness_business_working_hours", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessClassType", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DefaultCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DefaultDurationMin")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(60);
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("fitness_class_types", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMember", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("MemberCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("BusinessCustomerId");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CustomerProfileId");
+
+                    b.HasIndex("BusinessId", "MemberCode");
+
+                    b.ToTable("fitness_members", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMemberSessionDebt", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("FitnessClassTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessMemberTrainingPassId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("SessionsCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<DateTime?>("SettledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("VoidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessClassTypeId");
+
+                    b.HasIndex("FitnessMemberId");
+
+                    b.HasIndex("FitnessMemberTrainingPassId");
+
+                    b.HasIndex("FitnessSessionId");
+
+                    b.HasIndex("BusinessId", "Status");
+
+                    b.HasIndex("FitnessMemberId", "Status");
+
+                    b.ToTable("fitness_member_session_debts", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMemberTrainingPass", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<long?>("FitnessClassTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FitnessClassTypeNameSnapshot")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("FitnessMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessMembershipPlanId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsVoided")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PlanNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("PricePaid")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int?>("TotalSessions")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("ValidFromDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("ValidToDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("VoidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("VoidedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("WeeklySessionLimit")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessClassTypeId");
+
+                    b.HasIndex("FitnessMemberId");
+
+                    b.HasIndex("FitnessMembershipPlanId");
+
+                    b.HasIndex("IsVoided");
+
+                    b.HasIndex("BusinessId", "ValidFromDate", "ValidToDate");
+
+                    b.HasIndex("FitnessMemberId", "ValidFromDate", "ValidToDate");
+
+                    b.ToTable("fitness_member_training_passes", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMembershipPayment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<long>("FitnessMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateOnly>("PeriodEndDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodStartDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FitnessMemberId");
+
+                    b.HasIndex("FitnessMemberId", "PeriodStartDate", "PeriodEndDate");
+
+                    b.ToTable("fitness_membership_payments", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMembershipPlan", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("RSD");
+
+                    b.Property<int>("DefaultValidityDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(30);
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<long?>("FitnessClassTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int?>("TotalSessions")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("UnusedSessionsCarryOver")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("WeeklySessionLimit")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessClassTypeId");
+
+                    b.HasIndex("BusinessId", "DisplayOrder");
+
+                    b.HasIndex("BusinessId", "IsActive");
+
+                    b.ToTable("fitness_membership_plans", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessRoom", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("AllowsGroupClasses")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("AllowsIndividualTraining")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("BusinessId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("fitness_rooms", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessRoomWorkingHour", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<TimeOnly?>("CloseTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("FitnessRoomId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsClosed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<TimeOnly?>("OpenTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessRoomId");
+
+                    b.HasIndex("FitnessRoomId", "DayOfWeek")
+                        .IsUnique();
+
+                    b.ToTable("fitness_room_working_hours", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EndAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("FitnessClassTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessRoomId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessSessionTemplateId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("SessionType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("TrainerStaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessClassTypeId");
+
+                    b.HasIndex("FitnessRoomId");
+
+                    b.HasIndex("FitnessSessionTemplateId");
+
+                    b.HasIndex("TrainerStaffMemberId");
+
+                    b.HasIndex("BusinessId", "StartAtUtc");
+
+                    b.HasIndex("FitnessRoomId", "StartAtUtc", "EndAtUtc");
+
+                    b.ToTable("fitness_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSessionBooking", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("AttendedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("ConsumesTrainingPassSession")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CustomerPhone")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("FitnessMemberTrainingPassId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessSessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MembershipWarningText")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("MembershipWasActiveAtBooking")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("NoShowAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("BusinessCustomerId");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("CustomerProfileId");
+
+                    b.HasIndex("FitnessMemberId");
+
+                    b.HasIndex("FitnessMemberTrainingPassId");
+
+                    b.HasIndex("FitnessSessionId");
+
+                    b.HasIndex("FitnessSessionId", "Status");
+
+                    b.ToTable("fitness_session_bookings", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSessionTemplate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DurationMin")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(60);
+
+                    b.Property<long?>("FitnessClassTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FitnessRoomId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("SessionType")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeOnly>("StartTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<long?>("TrainerStaffMemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("ValidFromDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ValidToDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("FitnessClassTypeId");
+
+                    b.HasIndex("FitnessRoomId");
+
+                    b.HasIndex("TrainerStaffMemberId");
+
+                    b.HasIndex("FitnessRoomId", "DayOfWeek", "StartTime");
+
+                    b.ToTable("fitness_session_templates", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("AllowCustomerCancelBooking")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CustomerCancelDeadlineMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(120);
+
+                    b.Property<int>("DefaultMembershipDurationDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(30);
+
+                    b.Property<bool>("GroupClassesEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IndividualTrainingEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("MembershipsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("ReceivesCustomerMessages")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("UnpaidMembershipBookingPolicy")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId")
+                        .IsUnique();
+
+                    b.ToTable("fitness_settings", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Licensing.LicensedDevice", b =>
@@ -848,6 +2003,125 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("LicensedDevices");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Platform.AdminAccessCode", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedFromIp")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UsedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("UsedAtUtc");
+
+                    b.ToTable("admin_access_codes", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Platform.AdminAccessSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedFromIp")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("RevokedAtUtc");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("admin_access_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Platform.PlatformSetting", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("platform_settings", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Push.UserPushToken", b =>
@@ -2282,8 +3556,14 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("AppUserId")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime?>("ArrivedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("BusinessCustomerId")
+                        .HasColumnType("bigint");
 
                     b.Property<long>("BusinessId")
                         .HasColumnType("bigint");
@@ -2310,6 +3590,9 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<long?>("CustomerProfileId")
+                        .HasColumnType("bigint");
 
                     b.Property<int?>("ExpectedDurationMin")
                         .HasColumnType("integer");
@@ -2345,9 +3628,15 @@ namespace BookingPlatform.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AppUserId");
+
+                    b.HasIndex("BusinessCustomerId");
+
                     b.HasIndex("BusinessId");
 
                     b.HasIndex("CreatedTableSessionId");
+
+                    b.HasIndex("CustomerProfileId");
 
                     b.HasIndex("ReservationAtUtc");
 
@@ -2420,6 +3709,190 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasIndex("BusinessId", "TableResourceId", "Status");
 
                     b.ToTable("restaurant_table_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrder", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long?>("OwnerAppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OwnerCustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OwnerDisplayNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("SentToChatAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerAppUserId");
+
+                    b.HasIndex("OwnerCustomerProfileId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("OwnerCustomerProfileId", "Status");
+
+                    b.ToTable("shared_restaurant_orders", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("AddedByAppUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("AddedByCustomerProfileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AddedByDisplayNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("BusinessId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("BusinessNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("LineSubtotal")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<long>("MenuItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MenuItemNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("OrderPersonName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SendToKitchenSnapshot")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("SharedRestaurantOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SourceChatMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SourceSharedRestaurantOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("SourceSharedRestaurantOrderItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("UnitPriceSnapshot")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AddedByCustomerProfileId");
+
+                    b.HasIndex("BusinessId");
+
+                    b.HasIndex("MenuItemId");
+
+                    b.HasIndex("SharedRestaurantOrderId");
+
+                    b.ToTable("shared_restaurant_order_items", (string)null);
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItemOption", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AmountMode")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OptionNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("PriceDeltaSnapshot")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<long?>("RestaurantAddonId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("SharedRestaurantOrderItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RestaurantAddonId");
+
+                    b.HasIndex("SharedRestaurantOrderItemId");
+
+                    b.ToTable("shared_restaurant_order_item_options", (string)null);
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.BusinessWorkingHour", b =>
@@ -3053,6 +4526,17 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Navigation("Business");
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.BusinessActivityNotifications.BusinessActivityNotification", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Businesses.BusinessFeatureSettings", b =>
                 {
                     b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
@@ -3062,6 +4546,15 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Chat.ChatConversationMember", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Chat.ChatConversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Customers.BusinessCustomer", b =>
@@ -3083,6 +4576,347 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CustomerProfile");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessBusinessWorkingHour", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessClassType", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMember", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", "AppUser")
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Customers.BusinessCustomer", "BusinessCustomer")
+                        .WithMany()
+                        .HasForeignKey("BusinessCustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Customers.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AppUser");
+
+                    b.Navigation("Business");
+
+                    b.Navigation("BusinessCustomer");
+
+                    b.Navigation("CustomerProfile");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMemberSessionDebt", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessClassType", "FitnessClassType")
+                        .WithMany()
+                        .HasForeignKey("FitnessClassTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMember", "FitnessMember")
+                        .WithMany()
+                        .HasForeignKey("FitnessMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMemberTrainingPass", "FitnessMemberTrainingPass")
+                        .WithMany("SessionDebts")
+                        .HasForeignKey("FitnessMemberTrainingPassId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessSession", "FitnessSession")
+                        .WithMany()
+                        .HasForeignKey("FitnessSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessClassType");
+
+                    b.Navigation("FitnessMember");
+
+                    b.Navigation("FitnessMemberTrainingPass");
+
+                    b.Navigation("FitnessSession");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMemberTrainingPass", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessClassType", "FitnessClassType")
+                        .WithMany()
+                        .HasForeignKey("FitnessClassTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMember", "FitnessMember")
+                        .WithMany("TrainingPasses")
+                        .HasForeignKey("FitnessMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMembershipPlan", "FitnessMembershipPlan")
+                        .WithMany("MemberTrainingPasses")
+                        .HasForeignKey("FitnessMembershipPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessClassType");
+
+                    b.Navigation("FitnessMember");
+
+                    b.Navigation("FitnessMembershipPlan");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMembershipPayment", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMember", "FitnessMember")
+                        .WithMany("Payments")
+                        .HasForeignKey("FitnessMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("FitnessMember");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMembershipPlan", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessClassType", "FitnessClassType")
+                        .WithMany()
+                        .HasForeignKey("FitnessClassTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessClassType");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessRoom", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessRoomWorkingHour", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessRoom", "FitnessRoom")
+                        .WithMany("WorkingHours")
+                        .HasForeignKey("FitnessRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessRoom");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSession", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessClassType", "FitnessClassType")
+                        .WithMany("Sessions")
+                        .HasForeignKey("FitnessClassTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessRoom", "FitnessRoom")
+                        .WithMany("Sessions")
+                        .HasForeignKey("FitnessRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessSessionTemplate", "FitnessSessionTemplate")
+                        .WithMany("Sessions")
+                        .HasForeignKey("FitnessSessionTemplateId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", "TrainerStaffMember")
+                        .WithMany()
+                        .HasForeignKey("TrainerStaffMemberId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessClassType");
+
+                    b.Navigation("FitnessRoom");
+
+                    b.Navigation("FitnessSessionTemplate");
+
+                    b.Navigation("TrainerStaffMember");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSessionBooking", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", "AppUser")
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Customers.BusinessCustomer", "BusinessCustomer")
+                        .WithMany()
+                        .HasForeignKey("BusinessCustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Customers.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMember", "FitnessMember")
+                        .WithMany()
+                        .HasForeignKey("FitnessMemberId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessMemberTrainingPass", "FitnessMemberTrainingPass")
+                        .WithMany("Bookings")
+                        .HasForeignKey("FitnessMemberTrainingPassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessSession", "FitnessSession")
+                        .WithMany("Bookings")
+                        .HasForeignKey("FitnessSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppUser");
+
+                    b.Navigation("Business");
+
+                    b.Navigation("BusinessCustomer");
+
+                    b.Navigation("CustomerProfile");
+
+                    b.Navigation("FitnessMember");
+
+                    b.Navigation("FitnessMemberTrainingPass");
+
+                    b.Navigation("FitnessSession");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSessionTemplate", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessClassType", "FitnessClassType")
+                        .WithMany("SessionTemplates")
+                        .HasForeignKey("FitnessClassTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Fitness.FitnessRoom", "FitnessRoom")
+                        .WithMany("SessionTemplates")
+                        .HasForeignKey("FitnessRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BookingPlatform.Domain.Staff.StaffMember", "TrainerStaffMember")
+                        .WithMany()
+                        .HasForeignKey("TrainerStaffMemberId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Business");
+
+                    b.Navigation("FitnessClassType");
+
+                    b.Navigation("FitnessRoom");
+
+                    b.Navigation("TrainerStaffMember");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSettings", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Licensing.LicensedDevice", b =>
@@ -3419,6 +5253,16 @@ namespace BookingPlatform.Infrastructure.Migrations
 
             modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantTableReservation", b =>
                 {
+                    b.HasOne("BookingPlatform.Domain.Auth.AppUser", "AppUser")
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Customers.BusinessCustomer", "BusinessCustomer")
+                        .WithMany()
+                        .HasForeignKey("BusinessCustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("BookingPlatform.Domain.Businesses.Business", "Business")
                         .WithMany()
                         .HasForeignKey("BusinessId")
@@ -3428,6 +5272,11 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantTableSession", "CreatedTableSession")
                         .WithMany()
                         .HasForeignKey("CreatedTableSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BookingPlatform.Domain.Customers.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("BookingPlatform.Domain.Restaurants.RestaurantArea", "RestaurantArea")
@@ -3441,9 +5290,15 @@ namespace BookingPlatform.Infrastructure.Migrations
                         .HasForeignKey("TableResourceId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.Navigation("AppUser");
+
                     b.Navigation("Business");
 
+                    b.Navigation("BusinessCustomer");
+
                     b.Navigation("CreatedTableSession");
+
+                    b.Navigation("CustomerProfile");
 
                     b.Navigation("RestaurantArea");
 
@@ -3475,6 +5330,28 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Navigation("RestaurantArea");
 
                     b.Navigation("TableResource");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItem", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.SharedRestaurantOrder", "SharedRestaurantOrder")
+                        .WithMany("Items")
+                        .HasForeignKey("SharedRestaurantOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SharedRestaurantOrder");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItemOption", b =>
+                {
+                    b.HasOne("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItem", "SharedRestaurantOrderItem")
+                        .WithMany("Options")
+                        .HasForeignKey("SharedRestaurantOrderItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SharedRestaurantOrderItem");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Scheduling.StaffScheduleOverride", b =>
@@ -3580,6 +5457,51 @@ namespace BookingPlatform.Infrastructure.Migrations
                     b.Navigation("UserMemberships");
                 });
 
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessClassType", b =>
+                {
+                    b.Navigation("SessionTemplates");
+
+                    b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMember", b =>
+                {
+                    b.Navigation("Payments");
+
+                    b.Navigation("TrainingPasses");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMemberTrainingPass", b =>
+                {
+                    b.Navigation("Bookings");
+
+                    b.Navigation("SessionDebts");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessMembershipPlan", b =>
+                {
+                    b.Navigation("MemberTrainingPasses");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessRoom", b =>
+                {
+                    b.Navigation("SessionTemplates");
+
+                    b.Navigation("Sessions");
+
+                    b.Navigation("WorkingHours");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSession", b =>
+                {
+                    b.Navigation("Bookings");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Fitness.FitnessSessionTemplate", b =>
+                {
+                    b.Navigation("Sessions");
+                });
+
             modelBuilder.Entity("BookingPlatform.Domain.Resources.ResourceGroup", b =>
                 {
                     b.Navigation("Resources");
@@ -3632,6 +5554,16 @@ namespace BookingPlatform.Infrastructure.Migrations
             modelBuilder.Entity("BookingPlatform.Domain.Restaurants.RestaurantOrderMessage", b =>
                 {
                     b.Navigation("Recipients");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrder", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("BookingPlatform.Domain.Restaurants.SharedRestaurantOrderItem", b =>
+                {
+                    b.Navigation("Options");
                 });
 
             modelBuilder.Entity("BookingPlatform.Domain.Services.ServiceResourceUsage", b =>

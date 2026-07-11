@@ -22,6 +22,36 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.Email)
             .HasMaxLength(256);
 
+        builder.Property(x => x.Nickname)
+            .HasMaxLength(80);
+
+        builder.Property(x => x.AvatarUrl)
+            .HasMaxLength(500);
+
+        builder.Property(x => x.AllowUserSearch)
+            .HasDefaultValue(false);
+
+        builder.Property(x => x.AllowChatDiscovery)
+            .HasDefaultValue(false);
+
+        builder.Property(x => x.DefaultDeliveryAddress)
+            .HasMaxLength(500);
+
+        builder.Property(x => x.DefaultDeliveryCity)
+            .HasMaxLength(120);
+
+        builder.Property(x => x.DefaultDeliveryStreet)
+            .HasMaxLength(200);
+
+        builder.Property(x => x.DefaultDeliveryStreetNumber)
+            .HasMaxLength(40);
+
+        builder.Property(x => x.DefaultDeliveryApartment)
+            .HasMaxLength(120);
+
+        builder.Property(x => x.DefaultDeliveryNote)
+            .HasMaxLength(500);
+
         builder.Property(x => x.CreatedAtUtc)
             .IsRequired();
 

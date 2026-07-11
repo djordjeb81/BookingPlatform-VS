@@ -18,5 +18,7 @@ public sealed class BusinessFeatureSettingsDto
 
     public bool AccommodationEnabled { get; set; }
 
+    public bool HasCustomerSeating { get; set; }
+
     public bool ReviewsEnabled { get; set; } = true;
 }

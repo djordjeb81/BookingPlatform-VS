@@ -12,6 +12,15 @@ public interface ISystemAlarmService
         long? targetOperationUnitId,
         CancellationToken cancellationToken);
 
+    Task<SystemAlarmTrigger> CreateRestaurantOrderNotificationAlarmAsync(
+        long businessId,
+        long restaurantOrderId,
+        string title,
+        string message,
+        string soundKey,
+        string actionKey,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<SystemAlarmTrigger>> GetDueAlarmsAsync(
         long businessId,
         DateTime nowUtc,

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BookingPlatform.Domain.Auth;
+using BookingPlatform.Domain.BusinessActivityNotifications;
 
 namespace BookingPlatform.Api.Controllers;
 
@@ -1381,6 +1382,14 @@ var availability = await CheckAvailabilityViaServiceAsync(
             request.Note,
             cancellationToken);
 
+        await ResolveSalonAppointmentRequestNotificationAsync(
+            appointment.BusinessId,
+            appointment.Id,
+            DateTime.UtcNow,
+            cancellationToken);
+
+        await DbContext.SaveChangesAsync(cancellationToken);
+
         return Ok(new AppointmentActionResponse
         {
             AppointmentId = result.AppointmentId,
@@ -2153,6 +2162,11 @@ var availability = await CheckAvailabilityViaServiceAsync(
                     actionType = "NewBookingRequestExpired";
                     message = "Zahtev za termin je istekao jer nije bilo odgovora na vreme.";
                     newValuesJson = $"Status={appointment.Status}";
+                    await ResolveSalonAppointmentRequestNotificationAsync(
+                        appointment.BusinessId,
+                        appointment.Id,
+                        now,
+                        cancellationToken);
                     break;
 
                 case AppointmentChangeRequestType.CounterProposal:
@@ -2162,6 +2176,11 @@ var availability = await CheckAvailabilityViaServiceAsync(
                     actionType = "CounterProposalExpired";
                     message = "Predlog novog termina je istekao jer nije bilo odgovora na vreme.";
                     newValuesJson = $"Status={appointment.Status}";
+                    await ResolveSalonAppointmentRequestNotificationAsync(
+                        appointment.BusinessId,
+                        appointment.Id,
+                        now,
+                        cancellationToken);
                     break;
 
                 case AppointmentChangeRequestType.DelayProposal:
@@ -2726,6 +2745,12 @@ var availability = await CheckAvailabilityViaServiceAsync(
             pendingRequest.UpdatedAtUtc = now;
         }
 
+        await ResolveSalonAppointmentRequestNotificationAsync(
+            appointment.BusinessId,
+            appointment.Id,
+            now,
+            cancellationToken);
+
         await DbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -2751,7 +2776,44 @@ var availability = await CheckAvailabilityViaServiceAsync(
             pendingRequest.UpdatedAtUtc = now;
         }
 
+        await ResolveSalonAppointmentRequestNotificationAsync(
+            appointment.BusinessId,
+            appointment.Id,
+            now,
+            cancellationToken);
+
         await DbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task ResolveSalonAppointmentRequestNotificationAsync(
+        long businessId,
+        long appointmentId,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var activityKey = SalonAppointmentRequestNotificationKey(appointmentId);
+
+        var notification = await DbContext.BusinessActivityNotifications
+            .FirstOrDefaultAsync(
+                x => x.BusinessId == businessId &&
+                     x.RecipientKey == "business" &&
+                     x.ActivityKey == activityKey,
+                cancellationToken);
+
+        if (notification is null)
+            return;
+
+        notification.IsSeen = true;
+        notification.SeenAtUtc ??= nowUtc;
+        notification.IsResolved = true;
+        notification.ResolvedAtUtc = nowUtc;
+        notification.SnoozedUntilUtc = null;
+        notification.UpdatedAtUtc = nowUtc;
+    }
+
+    private static string SalonAppointmentRequestNotificationKey(long appointmentId)
+    {
+        return $"salon.appointment.request:{appointmentId}";
     }
 
 }

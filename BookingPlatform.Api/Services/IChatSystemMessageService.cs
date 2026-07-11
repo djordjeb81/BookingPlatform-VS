@@ -1,4 +1,5 @@
 ﻿using BookingPlatform.Domain.Appointments;
+using BookingPlatform.Domain.Restaurants;
 
 namespace BookingPlatform.Api.Services;
 
@@ -78,4 +79,8 @@ public interface IChatSystemMessageService
         Appointment appointment,
         AppointmentChangeRequest changeRequest,
         CancellationToken cancellationToken);
+
+    Task SendRestaurantTableReservationApprovedOrderPromptToCustomerAsync(
+    RestaurantTableReservation reservation,
+    CancellationToken cancellationToken);
 }
